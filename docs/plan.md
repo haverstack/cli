@@ -37,7 +37,7 @@ Mirror `@haverstack/eleventy`'s toolchain.
       `com.example.cli/recipe@1` + ~13 records: tagged, nested, unlisted, soft-deleted).
       `pnpm seed` / `pnpm types` / `pnpm reseed`.
 
-All five checks green (8 tests). `smol-toml` arrives in Phase 1; `yaml` in Phase 3;
+All five checks green (8 tests). `smol-toml` arrives in Phase 1; `yaml` in Phase 2;
 `@napi-rs/keyring` (and its `allowBuilds` entry) with the deferred keychain backend.
 
 ## Phase 1 — connection, config, key custody ✅
@@ -66,15 +66,25 @@ Deferred to a follow-up increment (additive, no schema/flow change): OS-keychain
 backend; `--as <profile>` to borrow an identity for a one-off URL connection. All five
 checks green (30 tests). Deps: `+ smol-toml`.
 
-## Phase 2 — read commands
+## Phase 2 — read commands ✅
 
-- [ ] `hstack types`, `hstack types show <typeId>` (`--json`).
-- [ ] `hstack ls <typeId> | --base <baseId>` with `--parent`/`--root`, `--tag`…,
-      `--limit`, `--json`. Cursor loop to exhaustion; never stop on an empty page.
-- [ ] `hstack show <id>` (`--json`, `--history` → `getVersions`).
-- [ ] `hstack versions <id>`.
-- [ ] Shared record-rendering helper (`StackRecord` → the `record.md` text) — reused by
-      the editor in Phase 4.
+- [x] `src/commands/types.ts` — `types` list + `types show <typeId>` (`--json`), the
+      latter with a `formatSchema` field table (kinds, `required`, nested `object`/`array`).
+- [x] `src/commands/records.ts` — `hstack ls [typeId]` / `--base`, `--parent`/`--root`,
+      repeatable `--tag`, `--limit`, `--json`. Type column dropped when one exact type is
+      pinned. Soft-deleted rows show `(deleted)`; unlisted/deleted excluded by default.
+- [x] `src/paginate.ts` — `queryAll(stack, query, limit?)`: `do/while` on `cursor`,
+      `null` is the only stop, `limit` slices. Used by `ls`, reused later.
+- [x] `src/commands/records.ts` — `hstack show <id>` (`--json`, `--history` appends the
+      version table) and `hstack versions <id>` (`--json`). `getVersions` returns only
+      _prior_ snapshots, so "at vN with no prior versions" is the fresh-record message.
+- [x] `src/record/format.ts` — `renderRecord(record, type?)` → `record.md` text (YAML
+      front matter via `yaml`, `_readonly` block, body = the one `text` field via
+      `bodyFieldOf`), `summarize` for listings, `formatSchema` / `fieldKindLabel`. This
+      is the faithful-render half; `scaffold` + `parse` + validation are Phase 3.
+
+Dep `+ yaml` (needed now for front-matter emission; also Phase 3's parser). Banner prints
+to stderr from every stack-opening command. 56 tests, all five checks green.
 
 ## Phase 3 — schema ↔ file codec
 

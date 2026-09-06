@@ -1,12 +1,12 @@
 /**
- * `hstack types` — list the types registered in a stack.
- *
- * Phase 0's proof-of-wiring command, and the base every editing command
- * builds on: the CLI defines no types, it reports whatever the stack has
- * (the six system types at minimum). See docs/design.md § Types.
+ * `hstack types` / `hstack types show <typeId>` — inspect the types a stack
+ * has. The CLI defines none; it reports whatever it finds (the six system
+ * types at minimum). See docs/design.md § Types.
  */
 
 import type { Stack, StackType } from '@haverstack/core';
+import { formatSchema } from '../record/format.js';
+import { iso } from '../util.js';
 
 export async function collectTypes(stack: Stack): Promise<StackType[]> {
   const types = await stack.listTypes();
@@ -26,4 +26,17 @@ export function formatTypes(types: StackType[], json: boolean): string {
     line('TYPE', 'NAME', 'SCHEMA'),
     ...types.map((t) => line(t.id, t.name, t.schemaHash.slice(0, 12))),
   ].join('\n');
+}
+
+export async function showType(stack: Stack, typeId: string, json: boolean): Promise<string> {
+  const type = await stack.getType(typeId);
+  if (!type) throw new Error(`No type "${typeId}".`);
+  if (json) return JSON.stringify(type, null, 2);
+
+  const header =
+    `${type.id}  (${type.name})\n` +
+    `schema ${type.schemaHash.slice(0, 12)}  ·  version ${type.version}  ·  ` +
+    `registered ${iso(type.createdAt)}` +
+    (type.migratesFrom ? `  ·  migrates from ${type.migratesFrom}` : '');
+  return `${header}\n\n${formatSchema(type.schema)}`;
 }

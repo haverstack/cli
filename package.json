@@ -51,7 +51,8 @@
     "@haverstack/adapter-local": "^0.25.0",
     "@haverstack/core": "^0.26.0",
     "commander": "^15.0.0",
-    "smol-toml": "^1.8.0"
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
