@@ -12,6 +12,13 @@ import { iso, oneLine } from '../util.js';
 import { stringify } from 'yaml';
 
 /**
+ * Front-matter keys the CLI owns. A schema field with one of these names
+ * cannot round-trip through the file (`tags` is the plausible one — it
+ * maps to tag associations here); such a field is skipped, with a note.
+ */
+export const RESERVED_FRONT_MATTER_KEYS = ['id', 'type', 'parentId', 'tags', '_readonly'];
+
+/**
  * The single field that renders as the body: the one `text` field, else a
  * `text` field literally named `body` or `text`, else none (front matter
  * only). Ambiguity is left for `hstack edit --body` to resolve.
@@ -27,7 +34,16 @@ export function bodyFieldOf(type: StackType | null | undefined): string | null {
   return null;
 }
 
-export function renderRecord(record: StackRecord, type?: StackType | null): string {
+export type RenderOptions = {
+  /** Also list optional fields the record does not set, commented out. */
+  all?: boolean;
+};
+
+export function renderRecord(
+  record: StackRecord,
+  type?: StackType | null,
+  opts: RenderOptions = {},
+): string {
   const body = bodyFieldOf(type);
 
   const front: Record<string, unknown> = { id: record.id, type: record.typeId };
@@ -41,16 +57,35 @@ export function renderRecord(record: StackRecord, type?: StackType | null): stri
   const order = type ? Object.keys(type.schema) : [];
   for (const key of Object.keys(record.content)) if (!order.includes(key)) order.push(key);
   for (const key of order) {
-    if (key === body || !(key in record.content)) continue;
+    if (key === body || RESERVED_FRONT_MATTER_KEYS.includes(key) || !(key in record.content))
+      continue;
     front[key] = record.content[key];
   }
 
   front._readonly = readonlyBlock(record);
 
-  const yaml = stringify(front, { lineWidth: 0 }).trimEnd();
+  let yaml = stringify(front, { lineWidth: 0 }).trimEnd();
+  if (opts.all && type) {
+    const missing = unsetFieldLines(record, type, body);
+    if (missing.length > 0)
+      yaml = yaml.replace('\n_readonly:', `\n${missing.join('\n')}\n_readonly:`);
+  }
+
   const bodyValue = body ? record.content[body] : undefined;
   const bodyText = typeof bodyValue === 'string' ? bodyValue : '';
   return `---\n${yaml}\n---\n${bodyText ? `${bodyText}\n` : ''}`;
+}
+
+/** `# dueDate:  # optional — date` for each schema field the record has no value for. */
+function unsetFieldLines(record: StackRecord, type: StackType, body: string | null): string[] {
+  const lines: string[] = [];
+  for (const [name, def] of Object.entries(type.schema)) {
+    if (name === body || name in record.content || RESERVED_FRONT_MATTER_KEYS.includes(name))
+      continue;
+    const label = def.required ? 'required' : 'optional';
+    lines.push(`# ${name}:`.padEnd(26) + ` # ${label} — ${fieldKindLabel(def)}`);
+  }
+  return lines;
 }
 
 function readonlyBlock(record: StackRecord): Record<string, unknown> {

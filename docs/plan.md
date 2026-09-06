@@ -86,22 +86,34 @@ checks green (30 tests). Deps: `+ smol-toml`.
 Dep `+ yaml` (needed now for front-matter emission; also Phase 3's parser). Banner prints
 to stderr from every stack-opening command. 56 tests, all five checks green.
 
-## Phase 3 — schema ↔ file codec
+## Phase 3 — schema ↔ file codec ✅
 
-The most-tested module. Pure functions, no I/O.
+Pure functions, no I/O. All in `src/record/`.
 
-- [ ] `scaffold(type, { minimal, parentId, id })` → `record.md` text: required fields
-      present, optional commented-out, `_readonly` block, body section per the
-      body-field rule (one `text` field; else `--body`/config; else none).
-- [ ] `render(record, type)` → `record.md` text for `hstack edit` (set fields, `--all` to
-      include unset).
-- [ ] `parse(text, type)` → `{ content, parentId, tags, bodyField }` + validation:
-      `date` ISO shape, `record-ref` charset, `file-ref` SHA-256 hex, `array`/`object`
-      recursion, reserved keys and field-name characters. Returns structured errors
-      with field paths.
-- [ ] `_readonly` diff-guard: detect edits to that block, error naming the porcelain
-      command.
-- [ ] Tests over every commons type's schema + a nested `array`/`object` fixture.
+- [x] `scaffold.ts` — `scaffoldRecord(type, { id, parentId, bodyField, minimal })` →
+      `record.md`: `type` + `tags: []` + required fields present, optional fields
+      commented out, each line hint-labelled with its kind; required nested objects
+      expand one level. Body section only when the type has a body field. No `_readonly`
+      on a new record.
+- [x] `format.ts` — `renderRecord` gained `{ all }` to list unset optional fields
+      commented out (spliced in before `_readonly:`). `RESERVED_FRONT_MATTER_KEYS`
+      (`id`/`type`/`parentId`/`tags`/`_readonly`) — a colliding content field is skipped
+      with a `# note:` in scaffold and dropped in render.
+- [x] `parse.ts` — `parseRecord(text, type, opts)` with opts `bodyField` / `expectId` /
+      `expectType` / `readonlyBaseline`. Returns the pieces a write needs, or throws
+      `RecordParseError` with `{ path, message }[]`. Body-field value comes only from the
+      body section; an empty body for a required text field is an error. `~`/blank
+      `parentId` → `null`. `_readonly` diff-guard against a supplied baseline.
+- [x] `validate.ts` — `validateAgainstSchema(content, schema)`: mirrors core's
+      `validateContent` (core doesn't export it) — required-missing, ISO date, 64-hex
+      file-ref, scalar-kind, array/object recursion with indexed paths, reserved keys,
+      field-name metacharacters. Core's write path stays authoritative.
+- [x] Tests: 32 new (`record-scaffold`, `record-parse` incl. a round-trip over all 10
+      commons types + nested `object`/`array` fixtures, `record-validate`, `--all`).
+      88 total.
+
+Dep `+ @haverstack/commons` (devDependency, for the round-trip test) + its workspace
+release-age exclude. `hstack new`/`edit`/`commit` wire this in at Phase 4.
 
 ## Phase 4 — editing model
 

@@ -36,6 +36,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.10.0)
+      '@haverstack/commons':
+        specifier: ^0.20.0
+        version: 0.20.0
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
@@ -329,6 +332,9 @@ packages:
 
   '@haverstack/blob-adapter-disk@0.24.0':
     resolution: {integrity: sha512-tyZDWq5MCweWH5KVGIFboD6C7cyt41Qog8K63+Ieak5A4mSXzINKeq+U45gQ4eTOx3GGnjIwhlnYIWBfTWCJVg==}
+
+  '@haverstack/commons@0.20.0':
+    resolution: {integrity: sha512-9DjBBL4iYXhH6iLAreLA7CmEQ30G8KkHxLs4vvE59FaXa5ql6Xwp9Mekjz+V+m0w7ppzMoNphgtD20/7CNeb2A==}
 
   '@haverstack/core@0.26.0':
     resolution: {integrity: sha512-PwqSSJVIS+haB4OIEz6loshdHiX+aPnK+OY4p4e9pU9BN5Zb0JqErrOs6nZKWKuaktF9XAKGnKVttyuMIUe27w==}
@@ -1399,6 +1405,10 @@ snapshots:
       '@haverstack/record-adapter-sqlite': 0.18.0
 
   '@haverstack/blob-adapter-disk@0.24.0':
+    dependencies:
+      '@haverstack/core': 0.26.0
+
+  '@haverstack/commons@0.20.0':
     dependencies:
       '@haverstack/core': 0.26.0
 

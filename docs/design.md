@@ -269,16 +269,31 @@ In order:
 
 This is the one convention the tool imposes on schemas it did not write. It holds for
 every commons text type (`note`, `article`, `message`, `post`, `page` each have exactly
-one `text` field) and degrades honestly rather than guessing.
+one `text` field) and degrades honestly rather than guessing. The body field's value
+comes only from the body section, never a front-matter key of the same name. An **empty
+body for a required text field** is treated as the omission it looks like — a
+`the body is empty` error — even though core would accept `""`.
+
+### Reserved front-matter keys
+
+`id`, `type`, `parentId`, `tags`, and `_readonly` are the CLI's own front-matter keys. A
+schema that declares a **content field** with one of these names (`tags` is the only
+plausible one) can't round-trip through the file: scaffold and `show` skip it with a
+`# note:` line, and `commit` leaves it untouched. Editing such a field needs the raw API.
 
 ### Validation on commit
 
-The parsed front matter plus body is validated against the same schema before any write:
+The parsed front matter plus body is checked against the schema before any write —
+mirroring core's own `validateContent` so the message names the field, working the same
+local or remote. Core's write-path validation stays authoritative; this is the
+pre-flight.
 
+- required fields present (recursively, into `object` properties and `array` items).
 - `date` fields against the ISO shape core pins (a regex, then `Date.parse` as a
   calendar check) — not bare `Date.parse`.
-- `record-ref` against the record-id charset; `file-ref` against SHA-256 hex.
-- `array` / `object` structurally, recursively.
+- `file-ref` against SHA-256 hex; scalar kind mismatches (`number` where a `string` was
+  declared, …) by path.
+- `array` / `object` structurally, recursively, with indexed paths (`emails[1].value`).
 - reserved content keys (`__proto__`, `constructor`, `prototype`) and field names
   containing `. [ ] $ " * #` rejected, matching core.
 

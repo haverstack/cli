@@ -94,6 +94,19 @@ describe('renderRecord', () => {
     const text = renderRecord(record, bare);
     expect(text.endsWith('---\n')).toBe(true);
   });
+
+  it('lists unset optional fields commented out under --all', () => {
+    const wide: StackType = {
+      ...noteType,
+      schema: { title: { kind: 'string' }, text: { kind: 'text' }, due: { kind: 'date' } },
+    };
+    const record = { ...baseRecord, content: { title: 'set', text: 'body' } };
+    const plain = renderRecord(record, wide);
+    const all = renderRecord(record, wide, { all: true });
+    expect(plain).not.toContain('# due:');
+    expect(all).toMatch(/# due:.*# optional — date/);
+    expect(all).toMatch(/\n_readonly:/); // inserted before the readonly block
+  });
 });
 
 describe('summarize', () => {

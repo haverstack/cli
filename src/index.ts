@@ -23,6 +23,13 @@ export {
   formatSchema,
   fieldKindLabel,
 } from './record/format.js';
+export type { RenderOptions } from './record/format.js';
+export { scaffoldRecord } from './record/scaffold.js';
+export type { ScaffoldOptions } from './record/scaffold.js';
+export { parseRecord, RecordParseError } from './record/parse.js';
+export type { ParsedRecord, ParseOptions } from './record/parse.js';
+export { validateAgainstSchema } from './record/validate.js';
+export type { FieldIssue } from './record/validate.js';
 
 export { loadConfig, saveConfig, getProfile, shortDid } from './config.js';
 export type { Config, Profile } from './config.js';
