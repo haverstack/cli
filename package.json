@@ -1,0 +1,67 @@
+{
+  "name": "@haverstack/cli",
+  "version": "0.0.0",
+  "description": "Type-agnostic terminal tool for editing a Haverstack stack — local SQLite file or remote server",
+  "type": "module",
+  "bin": {
+    "haverstack": "./dist/cli.js",
+    "hstack": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haverstack/cli.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "haverstack",
+    "cli",
+    "personal data",
+    "records",
+    "editor"
+  ],
+  "scripts": {
+    "prepublishOnly": "pnpm run build",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "changeset": "changeset",
+    "version-packages": "changeset version && pnpm run format",
+    "release": "pnpm run build && changeset publish"
+  },
+  "dependencies": {
+    "@haverstack/adapter-api": "^0.25.0",
+    "@haverstack/adapter-local": "^0.25.0",
+    "@haverstack/core": "^0.26.0",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.2",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.3",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "^2.0.0"
+  }
+}
