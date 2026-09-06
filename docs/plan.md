@@ -37,24 +37,34 @@ Mirror `@haverstack/eleventy`'s toolchain.
       `com.example.cli/recipe@1` + ~13 records: tagged, nested, unlisted, soft-deleted).
       `pnpm seed` / `pnpm types` / `pnpm reseed`.
 
-All five checks green (8 tests). `yaml` + a TOML parser (`smol-toml`) and
-`@napi-rs/keyring` land in Phase 1 when first imported; add `@napi-rs/keyring` to
-`allowBuilds` then.
+All five checks green (8 tests). `smol-toml` arrives in Phase 1; `yaml` in Phase 3;
+`@napi-rs/keyring` (and its `allowBuilds` entry) with the deferred keychain backend.
 
-## Phase 1 — connection, config, key custody
+## Phase 1 — connection, config, key custody ✅
 
-- [ ] `config.toml` load/save: profiles (`url`|`path`, `did`, `key`, `expectedOwner`,
-      per-type `body` overrides), `default`, `editor`, `explorer`.
-- [ ] XDG path resolution (`config` / `state` / `data`), created on demand.
-- [ ] `openStack(target)`: profile name | bare path | `https://` URL →
-      `LocalAdapter.open` or `APIAdapter.open({ url, credential, expectedOwner })` →
-      `Stack.create`. Returns `{ stack, mode: "owner" | "grantee" | "unscoped" }` (mode
-      from comparing the session DID to the discovered owner).
-- [ ] Key custody: `generateDidKeypair` on `hstack stack add --url`; store via OS keychain
-      (optional dep, lazy) else `0600` JWK under the keys dir; load → `DidCredential`
-      (`didCredentialFromKeypair` in-process, or a keychain-backed `sign`).
-- [ ] `hstack stack add | ls | use | rm`. `add --url` prints the DID to grant.
-- [ ] Banner: active target + mode, printed by write commands.
+- [x] `src/config.ts` — `config.toml` load/save via `smol-toml`. `Profile` = `url`|`path`,
+      `did`, `key`, `expectedOwner`, `body`; top level `default`, `editor`, `explorer`.
+      Comments are not preserved across a rewrite (machine-managed file).
+- [x] `src/paths.ts` — XDG `config`/`state`/`data` dirs, env read on every call so tests
+      point them at a scratch dir. Created on demand (`keys/` as `0700`).
+- [x] `src/openStack.ts` — `openStack({ target })`: resolves `--stack` → `$HAVERSTACK_STACK`
+      → `config.default`; a path opens `LocalAdapter`, a URL / a `url` profile opens
+      `APIAdapter.open({ url, credential, expectedOwner })`, a bare word is a profile
+      name. Returns `{ stack, target, mode, did, close }`; `computeMode` = `owner` iff the
+      authenticated DID is the reported owner, else `grantee`; local is `unscoped`.
+- [x] `src/keys.ts` — `generateAndStoreKey` writes a `0600` `<profile>.jwk.json`;
+      `loadSigner` re-imports it and returns `p => signWithDid(key, p)`. **OS keychain
+      deferred** — `key` field already carries the indirection (`"keychain"` sentinel
+      reserved, `loadSigner` throws a clear "not built yet" on it). `@napi-rs/keyring` + its `allowBuilds` entry land with that increment, not now.
+- [x] `src/commands/stack.ts` + `src/cli.ts` — `hstack stack add|ls|use|rm`. `add --url`
+      generates the key and prints the DID to grant; `add --path` stores an absolute
+      path; first profile becomes the default. `rm` leaves the key file, says where.
+- [x] `src/banner.ts` — `formatBanner` → `→ <target>  [<mode>]`, printed to **stderr** by
+      any command that opens a stack (so `--json` on stdout stays clean).
+
+Deferred to a follow-up increment (additive, no schema/flow change): OS-keychain key
+backend; `--as <profile>` to borrow an identity for a one-off URL connection. All five
+checks green (30 tests). Deps: `+ smol-toml`.
 
 ## Phase 2 — read commands
 

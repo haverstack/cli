@@ -106,9 +106,9 @@ explorer = true                 # open a file manager on the working dir too
 
 [profiles.personal]
 url  = "https://stack.example.com"
-did  = "did:key:z6Mk…"          # this CLI's identity, not the stack owner's
-key  = "keychain"               # or a path under the keys dir
-expectedOwner = "did:key:z6Mk…" # optional; open() refuses a server reporting anyone else
+did  = "did:key:z6Mk…"           # this CLI's identity, not the stack owner's
+key  = "personal.jwk.json"       # how to find the private key (a filename in the keys dir)
+expectedOwner = "did:key:z6Mk…"  # optional; open() refuses a server reporting anyone else
 
 [profiles.personal.body]
 "org.haverstack/article" = "text"   # per-type body-field override (see below)
@@ -119,8 +119,8 @@ path = "/home/jen/notes/scratch.db"   # a local file, not a URL
 
 A profile names either a `url` (server) or a `path` (local file). `--stack` accepts a
 profile name, a bare path, or a `https://` URL for a one-off server connection with no
-stored profile (in which case `--as <keyref>` supplies the identity, or it connects
-unauthenticated for public reads).
+stored profile (unauthenticated, for public reads). Resolution order when `--stack` is
+absent: `$HAVERSTACK_STACK`, then the config's `default`.
 
 ### Identity and key custody
 
@@ -132,23 +132,22 @@ by hand. `expectedOwner`, when set, makes `open()` refuse a server whose discove
 reports a different owner.
 
 Key custody is the CLI's job — core is explicit that it is an app concern
-(`identity.md`: "not this library's job"). Order of preference:
-
-1. **OS keychain** where one is reachable (libsecret / Keychain / Credential Manager),
-   via an optional dependency loaded lazily. `key = "keychain"` in the profile.
-2. **A `0600` JWK file** under `$XDG_DATA_HOME/haverstack/keys/<name>.jwk.json`
-   otherwise. `key = "<name>.jwk.json"`.
+(`identity.md`: "not this library's job"). The `key` field in a profile is the
+indirection point: a **`0600` JWK file** under `$XDG_DATA_HOME/haverstack/keys/`, named
+`<profile>.jwk.json`. An **OS-keychain** backend (`key = "keychain"`, via a lazily-loaded
+optional dependency) is the planned alternative — adding it changes no config shape and
+no code outside `keys.ts`, so it is deferred rather than designed around.
 
 The key is persisted on first run whether or not a server is reachable yet, because the
 asymmetry the spec warns about applies directly: losing it breaks nothing locally but
 permanently ends the ability to authenticate to any server as that identity. A private
-key is a `CryptoKey`; it round-trips through `exportDidPrivateKeyJwk` /
-`importDidPrivateKeyJwk`, and a `DidCredential` for `APIAdapter` is
-`{ did, sign }` — `didCredentialFromKeypair` when the key is in process, or a keychain
-lookup wrapped as `sign` otherwise.
+key round-trips through `exportDidPrivateKeyJwk` / `importDidPrivateKeyJwk`, and the
+`DidCredential` handed to `APIAdapter` is `{ did, sign }` where `sign` closes over the
+imported key via `signWithDid`. `hstack stack rm` never deletes the key file — it prints
+where it is and leaves removing it to the user.
 
 Local files need no identity: an unscoped `Stack` names no requester. `hstack stack add
-<name> --path <p>` just records the path.
+<name> --path <p>` just records the (absolute) path.
 
 ---
 

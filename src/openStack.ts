@@ -1,24 +1,32 @@
 /**
- * openStack — resolve a `--stack` target to an open Stack.
+ * openStack — resolve a target to an open Stack, local or server.
  *
- * Phase 0 handles local SQLite files by path only. Named server profiles,
- * `$HAVERSTACK_STACK`, config.toml resolution and the owner/grantee mode
- * probe arrive in Phase 1. See docs/design.md § It talks to a Stack.
+ * Resolution order for the target: the `--stack` value, else
+ * `$HAVERSTACK_STACK`, else the config's `default` profile. A target that
+ * looks like a path opens a local file; one that looks like a URL is a
+ * one-off server connection; anything else is a profile name.
+ * See docs/design.md § It talks to a Stack.
  */
 
 import { isAbsolute, resolve } from 'node:path';
 import { Stack } from '@haverstack/core';
+import type { DidCredential } from '@haverstack/core/wire';
 import { LocalAdapter } from '@haverstack/adapter-local';
+import { APIAdapter } from '@haverstack/adapter-api';
+import { loadConfig, type Profile } from './config.js';
+import { loadSigner } from './keys.js';
 
 export type StackMode = 'unscoped' | 'owner' | 'grantee';
 
 export type OpenedStack = {
   stack: Stack;
-  /** Where the stack resolved to — shown in the write-command banner. */
+  /** Resolved label for the write-command banner. */
   target: string;
-  /** Trust posture. Local files are always `unscoped`. */
+  /** Trust posture: local files are always `unscoped`. */
   mode: StackMode;
-  /** Flush and release the adapter's lock. Always call it. */
+  /** The DID this session authenticated as, if any. */
+  did?: string;
+  /** Flush and release the adapter's resources. Always call it. */
   close: () => Promise<void>;
 };
 
@@ -26,43 +34,75 @@ function looksLikeUrl(target: string): boolean {
   return /^https?:\/\//i.test(target);
 }
 
-/**
- * A local path for now means: contains a slash or ends in `.db`. A bare word
- * will later be looked up as a profile name; until profiles exist it is an
- * error rather than a silently-created file.
- */
 function looksLikePath(target: string): boolean {
   return target.includes('/') || target.includes('\\') || target.endsWith('.db');
 }
 
-export async function openStack(target: string | undefined): Promise<OpenedStack> {
+/** Owner iff we authenticated as exactly the DID the server calls its owner. */
+export function computeMode(ownerEntityId: string | undefined, did: string | undefined): StackMode {
+  return did !== undefined && did === ownerEntityId ? 'owner' : 'grantee';
+}
+
+export type OpenStackOptions = {
+  /** The `--stack` value, if given. */
+  target?: string;
+};
+
+async function openLocal(path: string): Promise<OpenedStack> {
+  const abs = isAbsolute(path) ? path : resolve(process.cwd(), path);
+  const adapter = await LocalAdapter.open({ path: abs });
+  const stack = await Stack.create(adapter);
+  return { stack, target: abs, mode: 'unscoped', close: () => stack.close() };
+}
+
+async function openServer(url: string, label: string, profile?: Profile): Promise<OpenedStack> {
+  let credential: DidCredential | undefined;
+  if (profile?.did && profile.key) {
+    const sign = await loadSigner(profile.key);
+    credential = { did: profile.did, sign };
+  }
+  const adapter = await APIAdapter.open({
+    url,
+    credential,
+    expectedOwner: profile?.expectedOwner,
+  });
+  const stack = await Stack.create(adapter);
+  return {
+    stack,
+    target: label,
+    mode: computeMode(stack.ownerEntityId, credential?.did),
+    did: credential?.did,
+    close: () => stack.close(),
+  };
+}
+
+export async function openStack(opts: OpenStackOptions = {}): Promise<OpenedStack> {
+  const config = await loadConfig();
+  const target = opts.target ?? process.env.HAVERSTACK_STACK ?? config.default;
+
   if (!target) {
     throw new Error(
-      'No stack selected. Pass --stack <path-to-.db>. Named server profiles arrive in a later release.',
+      'No stack selected. Pass --stack <path|profile>, set $HAVERSTACK_STACK, ' +
+        'or set a default with `hstack stack use <name>`.',
     );
   }
 
   if (looksLikeUrl(target)) {
-    throw new Error(
-      `Server stacks are not wired up yet: "${target}". Pass a path to a local .db file for now.`,
-    );
+    return openServer(target, target);
   }
 
-  if (!looksLikePath(target)) {
-    throw new Error(
-      `Unrecognized stack target "${target}". Pass a path to a local .db file ` +
-        '(profile names are not resolvable yet).',
-    );
+  if (looksLikePath(target)) {
+    return openLocal(target);
   }
 
-  const path = isAbsolute(target) ? target : resolve(process.cwd(), target);
-  const adapter = await LocalAdapter.open({ path });
-  const stack = await Stack.create(adapter);
-
-  return {
-    stack,
-    target: path,
-    mode: 'unscoped',
-    close: () => stack.close(),
-  };
+  const profile = config.profiles[target];
+  if (!profile) {
+    throw new Error(
+      `Unknown stack "${target}". It is not a profile, and does not look like a path or URL. ` +
+        'Add it with `hstack stack add`, or pass a path to a .db file.',
+    );
+  }
+  if (profile.path) return openLocal(profile.path);
+  if (profile.url) return openServer(profile.url, `${target} (${profile.url})`, profile);
+  throw new Error(`Profile "${target}" has neither a url nor a path.`);
 }
