@@ -33,7 +33,9 @@ export class RecordParseError extends Error {
 }
 
 const NATIVE_KEYS = new Set(RESERVED_FRONT_MATTER_KEYS);
-const FRONT_MATTER_RE = /^---\n([\s\S]*?)\n---[ \t]*(?:\n([\s\S]*))?$/;
+// Leading blank or `#` lines are tolerated: `hstack commit` prepends its
+// rejection notes there, and they must survive the next parse untouched.
+const FRONT_MATTER_RE = /^(?:[ \t]*(?:#[^\n]*)?\n)*---\n([\s\S]*?)\n---[ \t]*(?:\n([\s\S]*))?$/;
 
 export type ParseOptions = {
   /** Force the body field (from `--body` / config) instead of inferring it. */
@@ -106,7 +108,13 @@ export function parseRecord(
     issues.push({ path: 'tags', message: 'must be a list of strings' });
   }
 
-  if (opts.readonlyBaseline !== undefined && !deepEqual(fm._readonly, opts.readonlyBaseline)) {
+  // A missing `_readonly` is fine — dropping the snapshot changes nothing.
+  // Only a present-and-different block is a hand edit worth refusing.
+  if (
+    opts.readonlyBaseline !== undefined &&
+    fm._readonly !== undefined &&
+    !deepEqual(fm._readonly, opts.readonlyBaseline)
+  ) {
     issues.push({
       path: '_readonly',
       message:

@@ -12,16 +12,47 @@ export { formatBanner } from './banner.js';
 export { queryAll } from './paginate.js';
 
 export { collectTypes, formatTypes, showType } from './commands/types.js';
-export { listRecords, showRecord, recordVersions } from './commands/records.js';
+export {
+  listRecords,
+  showRecord,
+  recordVersions,
+  removeRecord,
+  restoreRecord,
+} from './commands/records.js';
 export type { ListOptions, ShowOptions } from './commands/records.js';
 export { stackAdd, stackList, stackUse, stackRemove } from './commands/stack.js';
 
+export { newRecord, editRecord, editStatus, commitEdit, discardEdit } from './commands/edit.js';
+export type { StartResult, NewOptions, CommitOptions, CommitOutcome } from './commands/edit.js';
+export {
+  acquireEdit,
+  listEdits,
+  resolveEdit,
+  releaseEdit,
+  editDir,
+  editRoot,
+  recordMdPath,
+  readEditFile,
+  writeEditFile,
+  EditInProgressError,
+} from './edit/lock.js';
+export type { LockData, OpenEdit, EditMode } from './edit/lock.js';
+export {
+  resolveEditorCommand,
+  launchEditor,
+  launchExplorer,
+  NoEditorError,
+} from './edit/editor.js';
+export { downloadEmbeds } from './edit/attachments.js';
+
 export {
   renderRecord,
+  readonlyBlock,
   summarize,
   bodyFieldOf,
   formatSchema,
   fieldKindLabel,
+  RESERVED_FRONT_MATTER_KEYS,
 } from './record/format.js';
 export type { RenderOptions } from './record/format.js';
 export { scaffoldRecord } from './record/scaffold.js';

@@ -115,25 +115,38 @@ Pure functions, no I/O. All in `src/record/`.
 Dep `+ @haverstack/commons` (devDependency, for the round-trip test) + its workspace
 release-age exclude. `hstack new`/`edit`/`commit` wire this in at Phase 4.
 
-## Phase 4 — editing model
+## Phase 4 — editing model ✅
 
-- [ ] Working-dir + lock manager: `edits/<profile>/<recordId>/` with `record.md` and
-      `.hstack-lock.json` (`recordId`, `typeId`, `mode`, `baseVersion`, `editorPid`,
-      `startedAt`, `profile`). Per-record, profile-namespaced.
-- [ ] Editor launch: `config.editor` → `$VISUAL` → `$EDITOR`; detached by default,
-      capture pid; `explorer` opens a file manager on the dir. `-c`/`--commit` waits
-      then commits.
-- [ ] `hstack new` — scaffold, lock `mode:"new"`, launch.
-- [ ] `hstack edit` — fetch record + type, render, snapshot `version` as `baseVersion`,
-      download `embed` attachments into the dir, lock `mode:"edit"`, launch.
-- [ ] `hstack status` — list open edits; detect stale (dir gone / pid dead).
-- [ ] `hstack commit [<id>]` — parse, validate (fail → reopen editor with errors
-      prepended), reconcile `parentId` + `tags` (set) + working-dir attachments,
-      `create()` or `update({ ifVersion: baseVersion })`, then release lock + delete
-      dir. `--force` drops `ifVersion`. `StackVersionConflictError` → keep everything,
-      print conflict + `hstack show --history` hint.
-- [ ] `hstack discard [<id>]` (`--stale` sweeps).
-- [ ] `hstack rm <id>` (`--hard`), `hstack restore <id>`.
+- [x] `src/edit/lock.ts` — `edits/<sha256(stackTarget).slice(0,12)>/<recordId>/` with
+      `record.md` + `.hstack-lock.json` (`recordId`, `typeId`, `mode`, `bodyField`,
+      `baseVersion?`, `readonly?`, `startedAt`, `stack`). Per-record; `acquireEdit`
+      refuses a live one (`EditInProgressError`), reclaims a stale one; `listEdits` /
+      `resolveEdit` / `releaseEdit`. **No `editorPid`** — a detached GUI launcher exits
+      at once, so pid-liveness is not a staleness signal; stale = `record.md` gone.
+- [x] `src/edit/editor.ts` — `resolveEditorCommand` (`config.editor` → `$VISUAL` →
+      `$EDITOR` → `''`), `launchEditor(cmd, file, wait)` (detached + `unref`, or
+      `spawnSync` for `-c`), `launchExplorer` (best-effort `xdg-open`/`open`/`explorer`).
+- [x] `src/edit/attachments.ts` — `downloadEmbeds` copies `embed` attachments into the
+      dir (filename from the earliest `_attachment@1`, collision-suffixed), best-effort.
+- [x] `src/commands/edit.ts` — `newRecord` (mints the id with `generateId`, scaffolds,
+      `mode:"new"`), `editRecord` (renders, snapshots `version` + `_readonly`,
+      `mode:"edit"`, downloads embeds), `editStatus`, `discardEdit` (`--stale`), and
+      `commitEdit`:
+  - parse fail → prepend `# ✗ …` notes, return `reopen` (CLI relaunches the editor),
+    keep the dir. Next parse strips a leading blank/`#` block (regex widened in
+    `parse.ts`).
+  - `new` → `create({ id, parentId })` + associate tags. `edit` → merge-patch (a
+    removed line → `null`, reserved keys skipped) under `ifVersion: baseVersion` unless
+    `--force`, then tag set-reconcile.
+  - conflict / dup-id / validation matched by error **`code`** (not `instanceof` — a
+    linked dev tree can load two `@haverstack/core` copies); working copy always kept.
+  - `parentId` change on `edit` → refused (create-time only in core).
+- [x] `src/commands/records.ts` — `removeRecord` (`--hard`), `restoreRecord`.
+- [x] `src/cli.ts` — `new`, `edit`, `status`, `commit`, `discard`, `rm`, `restore`
+      wired; `afterStart` does the editor/explorer launch (or the `-c` commit).
+- [x] Tests: `edit-lock` (7), `edit-editor` (4), `edit-commit` (9). 108 total.
+      Dogfooded end-to-end via the binary with a scripted `$EDITOR` (new -c, detached
+      edit, status, commit, the reopen-on-error loop, rm/restore, empty-commit errors).
 
 ## Phase 5 — relational porcelain
 

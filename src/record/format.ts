@@ -88,7 +88,11 @@ function unsetFieldLines(record: StackRecord, type: StackType, body: string | nu
   return lines;
 }
 
-function readonlyBlock(record: StackRecord): Record<string, unknown> {
+/**
+ * The `_readonly` mapping as `renderRecord` writes it. `hstack edit` keeps
+ * this as the baseline the parse-time diff-guard compares against.
+ */
+export function readonlyBlock(record: StackRecord): Record<string, unknown> {
   const ro: Record<string, unknown> = {
     version: record.version,
     createdAt: iso(record.createdAt),

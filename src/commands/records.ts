@@ -1,5 +1,6 @@
 /**
- * `hstack ls | show | versions` — read records.
+ * `hstack ls | show | versions | rm | restore` — read records, and the two
+ * lifecycle verbs that don't need an editor.
  *
  * Every listing loops the cursor to exhaustion (see paginate.ts); `--json`
  * emits the raw records for piping. `show` renders the `record.md` view
@@ -80,6 +81,27 @@ export async function recordVersions(stack: Stack, id: string, json: boolean): P
   if (!record && versions.length === 0) throw new Error(`No record "${id}".`);
   if (json) return JSON.stringify(versions, null, 2);
   return formatVersions(record, versions);
+}
+
+export async function removeRecord(stack: Stack, id: string, hard: boolean): Promise<string> {
+  const record = await stack.get(id);
+  if (!record) throw new Error(`No record "${id}".`);
+  if (hard) {
+    await stack.delete(id, { hard: true });
+    return `Purged ${id}. This cannot be undone.`;
+  }
+  if (record.deletedAt)
+    return `${id} is already deleted. \`hstack restore ${id}\` to bring it back.`;
+  await stack.delete(id);
+  return `Deleted ${id} (soft). \`hstack restore ${id}\` to undo.`;
+}
+
+export async function restoreRecord(stack: Stack, id: string): Promise<string> {
+  const record = await stack.get(id);
+  if (!record) throw new Error(`No record "${id}".`);
+  if (!record.deletedAt) return `${id} is not deleted.`;
+  const restored = await stack.undelete(id);
+  return `Restored ${id}, v${restored.version}.`;
 }
 
 function formatVersions(record: StackRecord | null, versions: RecordVersion[]): string {

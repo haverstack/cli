@@ -175,32 +175,42 @@ losing everything if the editor or terminal dies. The stateful model:
 ### Working directory layout
 
 ```
-$XDG_STATE_HOME/haverstack/edits/<profile>/<recordId>/
-  record.md         # YAML front matter + body — what your editor opens
-  .hstack-lock.json    # { recordId, typeId, mode, baseVersion, editorPid, startedAt, profile }
-  <anything else>   # files you drop here become attachments on commit
+$XDG_STATE_HOME/haverstack/edits/<stack-hash>/<recordId>/
+  record.md          # YAML front matter + body — what your editor opens
+  .hstack-lock.json  # { recordId, typeId, mode, bodyField, baseVersion?, readonly?, startedAt, stack }
+  <anything else>    # files dropped here become attachments on commit (Phase 6)
 ```
 
+`<stack-hash>` is a short SHA-256 of the resolved stack target (a path or `name (url)`),
+so the same record id being edited against two stacks never collides. On `hstack new`,
+`<recordId>` is minted up front with `generateId()` and written into the scaffold as
+`id:`, so the edit has a real id from the start.
+
 Locks are **per record, not global** — editing one record must never block editing
-another, and referencing record B while writing record A is the common case. They are
-namespaced by profile, so the same record id on two stacks does not collide. Nothing
+another, and referencing record B while writing record A is the common case. Nothing
 lives in the current directory or a repo; a working copy that ends up committed to git is
 a layout bug.
 
 ### Lifecycle
 
-| Command                                           | Does                                                                                                                                                                                                                                                                                      |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hstack new <typeId> [--parent <id>] [--id <id>]` | Fetch the type, scaffold `record.md`, take a lock in `mode: "new"`, launch the editor.                                                                                                                                                                                                    |
-| `hstack edit <id>`                                | Fetch the record + its type, render `record.md`, snapshot `version` as `baseVersion`, take a lock in `mode: "edit"`, launch the editor. Download existing `embed` attachments into the working dir.                                                                                       |
-| `hstack status`                                   | List every open edit for the active profile: record id, type, mode, age, whether the editor process is still alive, whether the working dir still exists.                                                                                                                                 |
-| `hstack commit [<id>]`                            | Parse `record.md`, validate against the schema, reconcile `tags`/`parentId`/attachments, write via `create()` (new) or `update()` with `ifVersion: baseVersion` (edit). On success, release the lock and delete the working dir. `<id>` is required only when more than one edit is open. |
-| `hstack discard [<id>]`                           | Delete the working dir and lock. Never touches the stack.                                                                                                                                                                                                                                 |
+| Command                                           | Does                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hstack new <typeId> [--parent <id>] [--id <id>]` | Fetch the type, scaffold `record.md`, take a lock in `mode: "new"`, launch the editor.                                                                                                                                                                                      |
+| `hstack edit <id>`                                | Fetch the record + its type, render `record.md`, snapshot `version` as `baseVersion`, take a lock in `mode: "edit"`, launch the editor. Download existing `embed` attachments into the working dir.                                                                         |
+| `hstack status`                                   | List every open edit for the active stack: record id, type, mode, age, and whether it is stale (working file gone).                                                                                                                                                         |
+| `hstack commit [<id>]`                            | Parse `record.md`, validate against the schema, reconcile `tags` as a set, write via `create()` (new) or `update()` with `ifVersion: baseVersion` (edit). On success, release the lock and delete the working dir. `<id>` is required only when more than one edit is open. |
+| `hstack discard [<id>]`                           | Delete the working dir and lock. Never touches the stack. `--stale` sweeps every stale edit.                                                                                                                                                                                |
 
-`hstack edit -c` / `--commit` waits for the editor process to exit and then commits
-automatically — the one-shot `git commit` feel, for people using a terminal editor. The
-default is fire-and-return: `hstack` launches the editor (and, if `explorer` is set, a file
-manager on the working dir) detached and exits.
+`hstack new` / `hstack edit` return once the working directory exists and hand the editor
+launch to the CLI: by default the editor (and, if `explorer` is set, a file manager on the
+working dir) is spawned **detached** and the process exits, releasing any lock on a local
+file. `-c` / `--commit` instead waits for the editor to exit and then commits — the
+one-shot `git commit` feel, for a terminal editor. The editor is `config.editor`, else
+`$VISUAL`, else `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
+
+`parentId` is **create-time only** in core, so a `commit` that finds it changed on an
+`edit` is refused with that reason rather than silently dropped. Re-uploading files
+dropped into the working directory is Phase 6.
 
 ### Optimistic concurrency
 
@@ -215,10 +225,11 @@ last-writer-wins). Nothing is ever lost to a rejected write.
 
 ### Stale locks
 
-A working dir that no longer exists, or a lock whose `editorPid` names a dead process,
-is _stale_. `hstack status` reports stale locks rather than treating them as active;
-`hstack edit` on a record with only a stale lock reclaims it (after printing what it
-found); `hstack discard --stale` sweeps all of them for the profile.
+An edit whose `record.md` is gone is _stale_. `hstack status` marks it rather than
+treating it as active; `hstack edit` on a record with only a stale lock reclaims it;
+`hstack discard --stale` sweeps every stale edit for the stack. Editor-process liveness is
+_not_ a staleness signal — a detached GUI editor's launcher exits the moment it opens the
+window, so a dead pid says nothing about whether the edit is still wanted.
 
 ---
 
@@ -256,8 +267,10 @@ Body text goes here — the schema's one `text` field.
   without being noisy — `hstack new --minimal` scaffolds only required fields, and
   `hstack edit` shows only fields that are set (plus `--all` to surface the rest).
 - **`_readonly` is exactly that.** Associations, permissions, `version`, and authorship
-  are shown so `record.md` is a faithful snapshot, but `commit` diffs the file ignoring
-  that block and errors if it was edited, naming the porcelain command that changes it.
+  are shown so `record.md` is a faithful snapshot. `commit` compares the block against
+  what `edit` rendered: an unchanged block is dropped from the write, a **present but
+  altered** block is refused with a pointer to `hstack link` / `perm` / `tag`, and a
+  block **deleted wholesale** is fine — removing the snapshot changes nothing.
 
 ### Which field is the body
 
