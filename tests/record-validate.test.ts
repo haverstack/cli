@@ -64,4 +64,35 @@ describe('validateAgainstSchema', () => {
     expect(out).toContain('__proto__');
     expect(out).toContain('a.b');
   });
+
+  it('rejects a field the schema does not declare, at every depth', () => {
+    const schema: TypeSchema = {
+      title: { kind: 'string' },
+      address: { kind: 'object', properties: { city: { kind: 'string' } } },
+    };
+    const out = paths(schema, { title: 'x', extra: 1, address: { city: 'NYC', zip: '10001' } });
+    expect(out).toContain('extra: not declared in the type’s schema');
+    expect(out).toContain('address.zip: not declared in the type’s schema');
+  });
+
+  it('holds an open container to its own kind but not its interior', () => {
+    const schema: TypeSchema = {
+      blob: { kind: 'object', open: true },
+      list: { kind: 'array', open: true },
+    };
+    expect(
+      validateAgainstSchema(
+        { blob: { anything: 'goes', nested: { ok: true } }, list: [1, 'x', null] },
+        schema,
+      ),
+    ).toEqual([]);
+    expect(paths(schema, { blob: [1, 2] })[0]).toMatch(/blob: expected a mapping/);
+    expect(paths(schema, { list: { not: 'a list' } })[0]).toMatch(/list: expected a list/);
+  });
+
+  it('still checks field-name metacharacters inside an open container', () => {
+    const schema: TypeSchema = { blob: { kind: 'object', open: true } };
+    const out = paths(schema, { blob: { ['a.b']: 1 } });
+    expect(out.some((m) => m.startsWith('blob.a.b:'))).toBe(true);
+  });
 });

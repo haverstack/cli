@@ -198,7 +198,7 @@ a layout bug.
 | `hstack new <typeId> [--parent <id>] [--id <id>]` | Fetch the type, scaffold `record.md`, take a lock in `mode: "new"`, launch the editor.                                                                                                                                                                                      |
 | `hstack edit <id>`                                | Fetch the record + its type, render `record.md`, snapshot `version` as `baseVersion`, take a lock in `mode: "edit"`, launch the editor. Download existing `embed` attachments into the working dir.                                                                         |
 | `hstack status`                                   | List every open edit for the active stack: record id, type, mode, age, and whether it is stale (working file gone).                                                                                                                                                         |
-| `hstack commit [<id>]`                            | Parse `record.md`, validate against the schema, reconcile `tags` as a set, write via `create()` (new) or `update()` with `ifVersion: baseVersion` (edit). On success, release the lock and delete the working dir. `<id>` is required only when more than one edit is open. |
+| `hstack commit [<id>]`                            | Parse `record.md`, validate against the schema, reconcile `tags` as a set, write via `create()` (new) or `mutate()` with `ifVersion: baseVersion` (edit). On success, release the lock and delete the working dir. `<id>` is required only when more than one edit is open. |
 | `hstack discard [<id>]`                           | Delete the working dir and lock. Never touches the stack. `--stale` sweeps every stale edit.                                                                                                                                                                                |
 
 `hstack new` / `hstack edit` return once the working directory exists and hand the editor
@@ -208,9 +208,14 @@ file. `-c` / `--commit` instead waits for the editor to exit and then commits �
 one-shot `git commit` feel, for a terminal editor. The editor is `config.editor`, else
 `$VISUAL`, else `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
 
-`parentId` is **create-time only** in core, so a `commit` that finds it changed on an
-`edit` is refused with that reason rather than silently dropped. Re-uploading files
-dropped into the working directory is Phase 6.
+**`parentId` moves with the record.** Core's `mutate()` carries a content patch and a
+`parentId` in one fenced, one-version write, so editing the `parentId` line and
+committing moves the record — core checks the destination exists and refuses a cycle,
+surfaced as an ordinary kept-copy failure if either is wrong. A root record's rendered
+buffer has no live `parentId` line to edit, so `hstack edit` always leaves a commented
+`# parentId:` hint in its place — otherwise moving a record would be a capability with no
+way to discover it from the file alone. Re-uploading files dropped into the working
+directory is Phase 6.
 
 ### Optimistic concurrency
 
@@ -302,6 +307,11 @@ local or remote. Core's write-path validation stays authoritative; this is the
 pre-flight.
 
 - required fields present (recursively, into `object` properties and `array` items).
+- **a field the schema does not declare is rejected**, at every depth — matching core's
+  own stance (a stray key is a typo, stale data, or a native field that landed in
+  content by mistake). A field declared `open: true` is the deliberate exception: its
+  interior is unvalidated, though it is still held to being the array or object the
+  schema says it is, and field-name characters are still checked inside it.
 - `date` fields against the ISO shape core pins (a regex, then `Date.parse` as a
   calendar check) — not bare `Date.parse`.
 - `file-ref` against SHA-256 hex; scalar kind mismatches (`number` where a `string` was

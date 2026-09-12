@@ -47,9 +47,9 @@
     "release": "pnpm run build && changeset publish"
   },
   "dependencies": {
-    "@haverstack/adapter-api": "^0.25.0",
-    "@haverstack/adapter-local": "^0.25.0",
-    "@haverstack/core": "^0.26.0",
+    "@haverstack/adapter-api": "^0.30.0",
+    "@haverstack/adapter-local": "^0.30.0",
+    "@haverstack/core": "^0.31.0",
     "commander": "^15.0.0",
     "smol-toml": "^1.8.0",
     "yaml": "^2.9.0"
@@ -58,7 +58,7 @@
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.2",
     "@eslint/js": "^10.0.1",
-    "@haverstack/commons": "^0.20.0",
+    "@haverstack/commons": "^0.25.0",
     "@types/node": "^22.0.0",
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",

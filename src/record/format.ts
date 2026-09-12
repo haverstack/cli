@@ -49,8 +49,9 @@ export function renderRecord(
   const front: Record<string, unknown> = { id: record.id, type: record.typeId };
   if (record.parentId) front.parentId = record.parentId;
 
-  const tags = (record.associations ?? []).filter((a) => a.kind === 'tag').map((a) => a.label);
-  if (tags.length > 0) front.tags = tags;
+  // Always present, even empty — parentId is movable and tags are always
+  // settable, so both need to be visible to edit, not just to fill in.
+  front.tags = (record.associations ?? []).filter((a) => a.kind === 'tag').map((a) => a.label);
 
   // Schema order when the type is known; declared fields first, then any
   // undeclared extras the record happens to carry.
@@ -65,6 +66,14 @@ export function renderRecord(
   front._readonly = readonlyBlock(record);
 
   let yaml = stringify(front, { lineWidth: 0 }).trimEnd();
+  // A root record shows no live parentId to edit — splice a commented hint
+  // in its place so moving the record is discoverable from `edit` alone.
+  if (!record.parentId) {
+    yaml = yaml.replace(
+      `\ntype: ${record.typeId}`,
+      `\ntype: ${record.typeId}\n# parentId:               # optional — id of a parent record`,
+    );
+  }
   if (opts.all && type) {
     const missing = unsetFieldLines(record, type, body);
     if (missing.length > 0)
@@ -118,9 +127,10 @@ export function summarize(record: StackRecord): string {
   return '—';
 }
 
-/** `string`, `array<string>`, `object`, … for a schema field. */
+/** `string`, `array<string>`, `object`, `array<open>`, … for a schema field. */
 export function fieldKindLabel(def: FieldDef): string {
-  if (def.kind === 'array') return `array<${fieldKindLabel(def.items)}>`;
+  if (def.kind === 'array') return `array<${def.open ? 'open' : fieldKindLabel(def.items)}>`;
+  if (def.kind === 'object' && def.open) return 'object<open>';
   return def.kind;
 }
 
@@ -134,8 +144,9 @@ export function formatSchema(schema: TypeSchema, indent = 0): string {
   for (const [name, def] of Object.entries(schema)) {
     const req = def.required ? '  required' : '';
     lines.push(`${pad}${name.padEnd(width)}  ${fieldKindLabel(def)}${req}`);
-    if (def.kind === 'object') lines.push(formatSchema(def.properties, indent + 1));
-    else if (def.kind === 'array' && def.items.kind === 'object') {
+    // `open: true` leaves the interior undeclared — nothing to recurse into.
+    if (def.kind === 'object' && !def.open) lines.push(formatSchema(def.properties, indent + 1));
+    else if (def.kind === 'array' && !def.open && def.items.kind === 'object' && !def.items.open) {
       lines.push(formatSchema(def.items.properties, indent + 1));
     }
   }

@@ -1,9 +1,12 @@
 /**
  * A pre-flight check of parsed content against a type's schema, so a bad
  * edit is reported field-by-field before any write is attempted rather
- * than coming back as a rejected `create()`/`update()`. It mirrors
+ * than coming back as a rejected `create()`/`patchContent()`. It mirrors
  * `@haverstack/core`'s own `validateContent` (which core does not export
- * from its root); core's write-path validation stays authoritative.
+ * from its root); core's write-path validation stays authoritative. A
+ * field the schema does not declare is refused, exactly as core refuses
+ * it on write — except inside a field declared `open: true`, whose
+ * interior the schema deliberately says nothing about.
  * See docs/spec/data-model.md § Types and § Content field names.
  */
 
@@ -37,6 +40,9 @@ function checkField(
       out.push({ path, message: `expected a list, got ${typeName(value)}` });
       return;
     }
+    // open: true declares a list, contents unspecified — held to its own
+    // kind, not to what's inside.
+    if (def.open) return;
     value.forEach((item, i) => checkField(item, def.items, `${path}[${i}]`, out, depth + 1));
     return;
   }
@@ -46,6 +52,7 @@ function checkField(
       out.push({ path, message: `expected a mapping, got ${typeName(value)}` });
       return;
     }
+    if (def.open) return;
     walkSchema(value as Record<string, unknown>, def.properties, path, out, depth + 1);
     return;
   }
@@ -77,6 +84,16 @@ function walkSchema(
   out: FieldIssue[],
   depth: number,
 ): void {
+  // A field outside the schema is refused, exactly as core's create()/
+  // patchContent() refuse it — a stray key is a typo, stale data, or a
+  // native field (parentId, tags) that landed in content by mistake.
+  for (const key of Object.keys(content)) {
+    if (!Object.hasOwn(schema, key)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      out.push({ path, message: 'not declared in the type’s schema' });
+    }
+  }
+
   for (const [key, def] of Object.entries(schema)) {
     const path = prefix ? `${prefix}.${key}` : key;
     const value = content[key];

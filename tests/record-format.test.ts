@@ -64,6 +64,20 @@ describe('renderRecord', () => {
     expect(text.endsWith('The body\nsecond line\n')).toBe(true);
   });
 
+  it('always shows tags (even empty) and a parentId hint on a root record', () => {
+    const text = renderRecord(baseRecord, noteType);
+    const fm = frontMatter(text);
+    expect(fm.tags).toEqual([]);
+    expect(text).toMatch(/^# parentId:.*optional — id of a parent record$/m);
+  });
+
+  it('shows parentId live, not as a hint, once the record has one', () => {
+    const record = { ...baseRecord, parentId: 'p0000000000x' };
+    const text = renderRecord(record, noteType);
+    expect(frontMatter(text).parentId).toBe('p0000000000x');
+    expect(text).not.toMatch(/# parentId:/);
+  });
+
   it('surfaces tags as a list and other associations under _readonly', () => {
     const record: StackRecord = {
       ...baseRecord,
@@ -134,5 +148,17 @@ describe('formatSchema', () => {
     expect(
       fieldKindLabel({ kind: 'array', items: { kind: 'array', items: { kind: 'number' } } }),
     ).toBe('array<array<number>>');
+  });
+
+  it('labels open containers and does not recurse into them', () => {
+    expect(fieldKindLabel({ kind: 'object', open: true })).toBe('object<open>');
+    expect(fieldKindLabel({ kind: 'array', open: true })).toBe('array<open>');
+    const out = formatSchema({
+      blob: { kind: 'object', open: true },
+      widgets: { kind: 'array', open: true },
+    });
+    expect(out).toMatch(/blob +object<open>/);
+    expect(out).toMatch(/widgets +array<open>/);
+    expect(out.split('\n')).toHaveLength(2); // no nested lines
   });
 });

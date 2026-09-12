@@ -71,4 +71,14 @@ describe('scaffoldRecord', () => {
     expect(text).toMatch(/^ {2}city:.*# required — string$/m);
     expect(text).toMatch(/^ {2}# zip:.*# optional — string$/m);
   });
+
+  it('scaffolds an open container as one leaf line, not an expanded subtree', () => {
+    const open = type({
+      meta: { kind: 'object', open: true, required: true },
+      raw: { kind: 'array', open: true },
+    });
+    const text = scaffoldRecord(open);
+    expect(text).toMatch(/^meta: \{\}.*# required — object<open>$/m);
+    expect(text).toMatch(/^# raw: \[\].*# optional — array<open>$/m);
+  });
 });

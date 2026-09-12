@@ -135,18 +135,52 @@ release-age exclude. `hstack new`/`edit`/`commit` wire this in at Phase 4.
   - parse fail → prepend `# ✗ …` notes, return `reopen` (CLI relaunches the editor),
     keep the dir. Next parse strips a leading blank/`#` block (regex widened in
     `parse.ts`).
-  - `new` → `create({ id, parentId })` + associate tags. `edit` → merge-patch (a
-    removed line → `null`, reserved keys skipped) under `ifVersion: baseVersion` unless
-    `--force`, then tag set-reconcile.
-  - conflict / dup-id / validation matched by error **`code`** (not `instanceof` — a
-    linked dev tree can load two `@haverstack/core` copies); working copy always kept.
-  - `parentId` change on `edit` → refused (create-time only in core).
+  - `new` → `create({ id, parentId })` + associate tags. `edit` → `mutate({ contentPatch,
+parentId })` (a removed content line → `null`, reserved keys skipped) under
+    `ifVersion: baseVersion` unless `--force`, then tag set-reconcile.
+  - conflict / dup-id / validation / bad-or-missing-parent matched by error **`code`**
+    (not `instanceof` — a linked dev tree can load two `@haverstack/core` copies);
+    working copy always kept on any recognized failure.
+  - `parentId` change on `edit` moves the record in the same write (see the dependency
+    bump note below — this was a refusal until core made moving possible).
 - [x] `src/commands/records.ts` — `removeRecord` (`--hard`), `restoreRecord`.
 - [x] `src/cli.ts` — `new`, `edit`, `status`, `commit`, `discard`, `rm`, `restore`
       wired; `afterStart` does the editor/explorer launch (or the `-c` commit).
-- [x] Tests: `edit-lock` (7), `edit-editor` (4), `edit-commit` (9). 108 total.
-      Dogfooded end-to-end via the binary with a scripted `$EDITOR` (new -c, detached
-      edit, status, commit, the reopen-on-error loop, rm/restore, empty-commit errors).
+- [x] Tests: `edit-lock` (7), `edit-editor` (4), `edit-commit` (10). 108 total at the
+      time. Dogfooded end-to-end via the binary with a scripted `$EDITOR` (new -c,
+      detached edit, status, commit, the reopen-on-error loop, rm/restore, empty-commit
+      errors).
+
+**Dependency bump (2026-09-11): core/adapter-local/adapter-api 0.26→0.31/0.30/0.30,
+commons 0.20→0.25.** `update()`/`setPermissions()`/`setUnlisted()`/`setParent()` are gone
+from `@haverstack/core` — `mutate(id, changes, opts)` replaces all four (one change set,
+one version), with `patchContent(id, patch, opts)` as the content-only spelling. Landed:
+
+- `commitEdit`'s edit path now calls `mutate({ contentPatch, parentId }, { ifVersion })`
+  instead of `update()`. **`parentId` is movable again** — core added `setParent()` then
+  folded it into `mutate()` — so the CLI no longer refuses a changed `parentId`; core
+  checks the destination exists and isn't a cycle, surfaced as an ordinary kept-copy
+  failure (matched by `code`, same as any other write refusal) if either is wrong.
+- `renderRecord` always shows `tags:` (even `[]`) and, on a root record, a commented
+  `# parentId:` hint — a root's buffer previously had no live `parentId` line to edit,
+  which would have made moving a record a capability with no way to discover it from
+  the file.
+- **Behavior change upstream: an undeclared content field is now rejected**, at every
+  depth, unless the field is declared `open: true` (a new schema shape whose interior is
+  unvalidated but which is still held to being an object/array). `record/validate.ts`
+  mirrors both: `walkSchema` flags any content key the schema doesn't declare, and
+  `checkField` skips recursing into an `open` field while still checking it's the right
+  container kind. `formatSchema`/`fieldKindLabel`/`scaffoldRecord` render `open` fields
+  as `array<open>`/`object<open>`, one leaf line, no expansion.
+- Test-file `stack.update()` calls → `stack.patchContent()`. `cli-example`'s
+  `scripts/seed.ts` (`setUnlisted` → `mutate({ unlisted: true })`) and
+  `scripts/exercise-{codec,edit}.ts` updated and bumped the same way; `exercise-edit.ts`
+  gained a "move to a new parent in the same commit" scenario. Both dogfood scripts and
+  the full test suite (116 tests, up from 108) verified green against the bumped
+  versions; the binary was separately re-verified end to end (edit shows the hint →
+  hand-edit `parentId:` → `commit` moves the record).
+- `total` (removed from `QueryResult` in core 0.27) needed no change — `queryAll` never
+  read it.
 
 ## Phase 5 — relational porcelain
 

@@ -162,22 +162,17 @@ export async function commitEdit(
 
     const record = await stack.get(data.recordId);
     if (!record) return { ok: false, message: `Record "${data.recordId}" no longer exists.` };
-    if (parsed.parentId !== (record.parentId ?? null)) {
-      return {
-        ok: false,
-        message:
-          `parentId cannot change after a record is created (it is ` +
-          `${record.parentId ? `"${record.parentId}"` : 'unset'}). Restore that line and re-commit.`,
-      };
-    }
 
     const patch = buildPatch(record.content, parsed.content);
-    // The content write carries the ifVersion fence; tag reconcile runs
-    // after (associations are set-merged, not fenced), so re-read for the
-    // version the record actually ended on.
-    await stack.update(data.recordId, patch, {
-      ifVersion: opts.force ? undefined : data.baseVersion,
-    });
+    // mutate() carries content and parentId in one fenced, one-version
+    // write; core checks the destination exists and refuses a cycle. Tag
+    // reconcile runs after (associations are set-merged, not fenced), so
+    // re-read for the version the record actually ended on.
+    await stack.mutate(
+      data.recordId,
+      { contentPatch: patch, parentId: parsed.parentId },
+      { ifVersion: opts.force ? undefined : data.baseVersion },
+    );
     await reconcileTags(stack, record, parsed.tags);
     await releaseEdit(dir);
     const final = await stack.get(data.recordId);
@@ -197,7 +192,11 @@ export async function commitEdit(
           `then re-\`hstack edit\` or \`hstack commit --force\`. Your working copy is kept.`,
       };
     }
-    if (code === 'conflict' || code === 'validation') {
+    // Any other recognized Stack error (bad/missing parentId, an
+    // undeclared or malformed content field, …) — the message already
+    // names what's wrong; the working copy survives so the fix costs
+    // nothing.
+    if (code) {
       return {
         ok: false,
         message: `${(err as Error).message}\nYour working copy is kept at ${dir}.`,

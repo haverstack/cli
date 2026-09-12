@@ -69,7 +69,7 @@ describe('edit -> commit', () => {
   });
 
   it('writes changes back as a patch, nulling fields whose line was removed', async () => {
-    await stack.update(id, { pinned: true }); // v2, pinned set
+    await stack.patchContent(id, { pinned: true }); // v2, pinned set
     const started = await editRecord(stack, LABEL, id);
     let md = await readEditFile(started.dir);
     md = md
@@ -103,7 +103,7 @@ describe('edit -> commit', () => {
 
   it('refuses a stale write, keeps the copy, and --force overrides', async () => {
     const started = await editRecord(stack, LABEL, id); // baseVersion 1
-    await stack.update(id, { title: 'External edit' }); // -> v2
+    await stack.patchContent(id, { title: 'External edit' }); // -> v2
     await writeEditFile(
       started.dir,
       (await readEditFile(started.dir)).replace('title: Orig', 'title: Mine'),
@@ -119,7 +119,7 @@ describe('edit -> commit', () => {
     expect((await stack.get(id))?.content.title).toBe('Mine');
   });
 
-  it('rejects a changed parentId', async () => {
+  it('moves the record when parentId changes, in the same write', async () => {
     await stack.defineType('com.example/folder@1', 'Folder', {
       name: { kind: 'string', required: true },
     });
@@ -133,8 +133,23 @@ describe('edit -> commit', () => {
       ),
     );
     const outcome = await commitEdit(stack, LABEL, id, {});
+    expect(outcome.ok).toBe(true);
+    expect((await stack.get(id))?.parentId).toBe(parent.id);
+  });
+
+  it('surfaces a nonexistent parentId as a kept-copy failure, not a crash', async () => {
+    const started = await editRecord(stack, LABEL, id);
+    await writeEditFile(
+      started.dir,
+      (await readEditFile(started.dir)).replace(
+        'type: com.example/note@1',
+        'type: com.example/note@1\nparentId: zzzzzzzzzzzz',
+      ),
+    );
+    const outcome = await commitEdit(stack, LABEL, id, {});
     expect(outcome.ok).toBe(false);
-    expect(outcome.message).toMatch(/parentId cannot change/);
+    expect(outcome.message).toMatch(/kept at/);
+    expect(await editStatus(LABEL)).toMatch(/open/);
   });
 
   it('a rejected commit re-parses cleanly once the notes are left in place', async () => {

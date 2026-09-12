@@ -154,6 +154,7 @@ function sampleValue(def: TypeSchema[string]): unknown {
     case 'array':
       return [];
     case 'object': {
+      if (def.open) return {};
       const obj: Record<string, unknown> = {};
       for (const [k, d] of Object.entries(def.properties)) if (d.required) obj[k] = sampleValue(d);
       return obj;

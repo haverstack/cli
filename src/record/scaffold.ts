@@ -61,7 +61,9 @@ function fieldLines(
   const mark = def.required ? '' : '# ';
   const hint = `${def.required ? 'required' : 'optional'} — ${fieldKindLabel(def)}`;
 
-  if (def.kind === 'object') {
+  // `open: true` declares no interior to scaffold — a single line stands
+  // for the whole field, same as any other leaf.
+  if (def.kind === 'object' && !def.open) {
     const nested = Object.entries(def.properties).flatMap(([k, d]) =>
       fieldLines(k, d, indent + 1, minimal),
     );
@@ -71,7 +73,14 @@ function fieldLines(
     return [hinted(`${pad}${mark}${name}:`, hint), ...body];
   }
 
-  const value = def.kind === 'array' ? ' []' : def.kind === 'boolean' ? ' false' : '';
+  const value =
+    def.kind === 'array'
+      ? ' []'
+      : def.kind === 'object'
+        ? ' {}'
+        : def.kind === 'boolean'
+          ? ' false'
+          : '';
   return [hinted(`${pad}${mark}${name}:${value}`, hint)];
 }
 

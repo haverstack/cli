@@ -65,7 +65,7 @@ describe('listRecords', () => {
 
 describe('showRecord', () => {
   it('renders front matter + body and can append history', async () => {
-    await stack.update(noteId, { title: 'Child v2' });
+    await stack.patchContent(noteId, { title: 'Child v2' });
     const text = await showRecord(stack, noteId, { history: true });
     expect(text).toMatch(/^---\n/);
     expect(text).toContain('tags:');
@@ -89,7 +89,7 @@ describe('recordVersions', () => {
   });
 
   it('lists prior versions after an update', async () => {
-    await stack.update(inboxId, { title: 'again' });
+    await stack.patchContent(inboxId, { title: 'again' });
     const text = await recordVersions(stack, inboxId, false);
     expect(text).toMatch(/^VER\s+UPDATED/m);
     expect(text).toMatch(/current: v2/);
