@@ -37,7 +37,7 @@ Mirror `@haverstack/eleventy`'s toolchain.
       `com.example.cli/recipe@1` + ~13 records: tagged, nested, unlisted, soft-deleted).
       `pnpm seed` / `pnpm types` / `pnpm reseed`.
 
-All five checks green (8 tests). `smol-toml` arrives in Phase 1; `yaml` in Phase 2;
+All five checks green. `smol-toml` arrives in Phase 1; `yaml` in Phase 2;
 `@napi-rs/keyring` (and its `allowBuilds` entry) with the deferred keychain backend.
 
 ## Phase 1 — connection, config, key custody ✅
@@ -64,7 +64,7 @@ All five checks green (8 tests). `smol-toml` arrives in Phase 1; `yaml` in Phase
 
 Deferred to a follow-up increment (additive, no schema/flow change): OS-keychain key
 backend; `--as <profile>` to borrow an identity for a one-off URL connection. All five
-checks green (30 tests). Deps: `+ smol-toml`.
+checks green. Deps: `+ smol-toml`.
 
 ## Phase 2 — read commands ✅
 
@@ -84,7 +84,7 @@ checks green (30 tests). Deps: `+ smol-toml`.
       is the faithful-render half; `scaffold` + `parse` + validation are Phase 3.
 
 Dep `+ yaml` (needed now for front-matter emission; also Phase 3's parser). Banner prints
-to stderr from every stack-opening command. 56 tests, all five checks green.
+to stderr from every stack-opening command. All five checks green.
 
 ## Phase 3 — schema ↔ file codec ✅
 
@@ -108,9 +108,8 @@ Pure functions, no I/O. All in `src/record/`.
       `validateContent` (core doesn't export it) — required-missing, ISO date, 64-hex
       file-ref, scalar-kind, array/object recursion with indexed paths, reserved keys,
       field-name metacharacters. Core's write path stays authoritative.
-- [x] Tests: 32 new (`record-scaffold`, `record-parse` incl. a round-trip over all 10
-      commons types + nested `object`/`array` fixtures, `record-validate`, `--all`).
-      88 total.
+- [x] Tests: `record-scaffold`, `record-parse` (incl. a round-trip over every commons
+      type + nested `object`/`array` fixtures), `record-validate`, `--all`.
 
 Dep `+ @haverstack/commons` (devDependency, for the round-trip test) + its workspace
 release-age exclude. `hstack new`/`edit`/`commit` wire this in at Phase 4.
@@ -146,10 +145,9 @@ parentId })` (a removed content line → `null`, reserved keys skipped) under
 - [x] `src/commands/records.ts` — `removeRecord` (`--hard`), `restoreRecord`.
 - [x] `src/cli.ts` — `new`, `edit`, `status`, `commit`, `discard`, `rm`, `restore`
       wired; `afterStart` does the editor/explorer launch (or the `-c` commit).
-- [x] Tests: `edit-lock` (7), `edit-editor` (4), `edit-commit` (10). 108 total at the
-      time. Dogfooded end-to-end via the binary with a scripted `$EDITOR` (new -c,
-      detached edit, status, commit, the reopen-on-error loop, rm/restore, empty-commit
-      errors).
+- [x] Tests: `edit-lock`, `edit-editor`, `edit-commit`. Dogfooded end-to-end via the
+      binary with a scripted `$EDITOR` (new -c, detached edit, status, commit, the
+      reopen-on-error loop, rm/restore, empty-commit errors).
 
 **Dependency bump (2026-09-11): core/adapter-local/adapter-api 0.26→0.31/0.30/0.30,
 commons 0.20→0.25.** `update()`/`setPermissions()`/`setUnlisted()`/`setParent()` are gone
@@ -176,9 +174,9 @@ one version), with `patchContent(id, patch, opts)` as the content-only spelling.
   `scripts/seed.ts` (`setUnlisted` → `mutate({ unlisted: true })`) and
   `scripts/exercise-{codec,edit}.ts` updated and bumped the same way; `exercise-edit.ts`
   gained a "move to a new parent in the same commit" scenario. Both dogfood scripts and
-  the full test suite (116 tests, up from 108) verified green against the bumped
-  versions; the binary was separately re-verified end to end (edit shows the hint →
-  hand-edit `parentId:` → `commit` moves the record).
+  the full test suite verified green against the bumped versions; the binary was
+  separately re-verified end to end (edit shows the hint → hand-edit `parentId:` →
+  `commit` moves the record).
 - `total` (removed from `QueryResult` in core 0.27) needed no change — `queryAll` never
   read it.
 
