@@ -341,30 +341,45 @@ how typeable the value is, not by mechanism.
 
 ### Through porcelain subcommands
 
-Everything whose value is an opaque identifier or a discriminated union:
+Everything whose value is an opaque identifier or a discriminated union. Each noun's
+subcommands are verb-first (`tag add <id> <label>`, not `tag <id> add <label>`) —
+consistent with `stack add`/`types show` rather than the earlier sketch:
 
 ```
-hstack tag   <id> add|rm <label>
-hstack link  <id> add|rm --label <l> ( --to-record <id> [--stack-url <u>]
-                                  | --to-entity <did>
-                                  | --to-external <ns> <id> )
-hstack perm  <id> add|rm ( --public | --entity <did> | --group <id> ) [--read] [--write]
-hstack grant <typeId> add|rm ( --entity <did> | --group <id> | --default ) <action>...
+hstack tag  add|rm <id> <label>
+hstack link add|rm <id> --label <l> ( --to-record <id> [--stack-url <u>]
+                                     | --to-entity <did>
+                                     | --to-external <ns> --external-id <id> )
+hstack perm add|rm <id> ( --public | --entity <did> | --group <id> [--role admin] )
+                         [--read] [--write]
+hstack grant add|rm <typeId> ( --entity <did> | --group <id> | --default ) <action>...
 hstack grant ls [--type <typeId>]
 ```
 
 `link` mirrors core's `RelationshipTarget` union exactly — a target names one identifier
 space (`record` / `entity` / `external`) one way, and an absent `--stack-url` means _this
-stack_, never a wildcard. Typing that union as YAML in a text file is precisely what a
-text editor is bad at; a command with validation and, later, tab-completion is better
-even before any picker exists.
+stack_, never a wildcard. `dissociate()` matches a target exactly, so `link rm` takes the
+same target flags `link add` did. Typing that union as YAML in a text file is precisely
+what a text editor is bad at; a command with validation and, later, tab-completion is
+better even before any picker exists.
+
+**`perm`** edits one entry of the record's whole `Permission[]` and writes the array back
+via `mutate()` (there is no single-permission verb any more — `setPermissions()` was
+folded into `mutate()`). An entry's identity is `public`, `entity:<did>`, or
+`group:<id>:<role|member>` — an admin-only and a general-member grant on the same group
+are different entries. `add` **merges** access bits into an existing entry (`--write`
+after `--read` produces read **and** write, never resets what was already granted);
+`rm` **narrows**: naming `--write` alone clears just that bit, and an entry left with
+neither bit is dropped. `rm` with no `--read`/`--write` (or `--public`) drops the entry
+outright. Core itself enforces `write` requires `read` in the same entry — the CLI does
+not duplicate that check, it lets core's own message teach it.
 
 `grant` actions are core's `GrantAction` set — `create`, `read-own`, `read-any`,
-`update-own`, `update-any`, `delete-own`, `delete-any` — and the CLI enforces core's
-dependency rule (a `-any`/`-own` mutate needs a matching-scope read action in the same
-grant) before calling `stack.grant()`, so the error names the missing action rather than
-letting the write convey nothing. Grants are `_grant` records under the hood and work
-through either backend.
+`update-own`, `update-any`, `delete-own`, `delete-any`. Core enforces the dependency
+(a `-any`/`-own` mutate action needs a matching-scope read action in the same grant) and
+names the missing one in its own error; the CLI does not re-derive that rule client-side,
+since a copy could disagree with the answer that actually governs the write. Grants are
+`_grant` records under the hood and work through either backend.
 
 ### Attachments — both ways
 
@@ -384,32 +399,39 @@ file a no-op.
 
 Core gates reference creation on read access to the target: a `relationship` to a record
 in this stack, a `parentId`, and an `attachment` association each require that the writer
-can see what they point at. Against a server as a grantee this can fail at commit; the
-CLI surfaces it as "you can't reference `<id>` because you can't read it", not a bare
-permission error.
+can see what they point at. Against a server as a grantee this can fail at commit or at
+`link`. The CLI does **not** reword that refusal — a missing target and an unreadable one
+are deliberately indistinguishable (the anti-oracle property access-control.md documents:
+telling them apart would let a grantee learn something a plain permission error does
+not), so the honest thing is to show the same permission-denied message core already
+gives, not to invent a more specific one the server never promised.
 
 ---
 
 ## Command surface
 
-| Command                                                                         | Purpose                                                                            |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `hstack stack add <name> (--url <u> [--expected-owner <did>] \| --path <p>)`    | Create a profile; generate + store a key for a server profile                      |
-| `hstack stack ls` / `hstack stack use <name>` / `hstack stack rm <name>`        | Manage profiles and the default                                                    |
-| `hstack types`                                                                  | List registered types (id, name, schemaHash)                                       |
-| `hstack types show <typeId>`                                                    | Print a type's schema                                                              |
-| `hstack types define <schema.json>`                                             | Register a type from `{ id, name, schema, migratesFrom? }`                         |
-| `hstack ls <typeId> \| --base <baseId>`                                         | List records of a type — `--parent <id>`/`--root`, `--tag <l>`…, `--limit N`       |
-| `hstack show <id>`                                                              | Print a record — `--history` for version history                                   |
-| `hstack new <typeId>`                                                           | Scaffold and open a new record — `--parent`, `--id`, `--minimal`, `--body <field>` |
-| `hstack edit <id>`                                                              | Open an existing record — `--all`, `--body <field>`, `-c`/`--commit`               |
-| `hstack status`                                                                 | List open edits for the active profile                                             |
-| `hstack commit [<id>]`                                                          | Validate and write back — `--force` to drop the `ifVersion` fence                  |
-| `hstack discard [<id>]`                                                         | Abandon a working copy — `--stale` to sweep stale locks                            |
-| `hstack rm <id>`                                                                | Soft-delete — `--hard` to purge (owner-only on a server)                           |
-| `hstack restore <id>`                                                           | Undelete                                                                           |
-| `hstack versions <id>`                                                          | Version history                                                                    |
-| `hstack tag` / `hstack link` / `hstack attach` / `hstack perm` / `hstack grant` | Associations, permissions, grants (above)                                          |
+| Command                                                                      | Purpose                                                                            |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `hstack stack add <name> (--url <u> [--expected-owner <did>] \| --path <p>)` | Create a profile; generate + store a key for a server profile                      |
+| `hstack stack ls` / `hstack stack use <name>` / `hstack stack rm <name>`     | Manage profiles and the default                                                    |
+| `hstack types`                                                               | List registered types (id, name, schemaHash)                                       |
+| `hstack types show <typeId>`                                                 | Print a type's schema                                                              |
+| `hstack types define <schema.json>`                                          | Register a type from `{ id, name, schema, migratesFrom? }`                         |
+| `hstack ls <typeId> \| --base <baseId>`                                      | List records of a type — `--parent <id>`/`--root`, `--tag <l>`…, `--limit N`       |
+| `hstack show <id>`                                                           | Print a record — `--history` for version history                                   |
+| `hstack new <typeId>`                                                        | Scaffold and open a new record — `--parent`, `--id`, `--minimal`, `--body <field>` |
+| `hstack edit <id>`                                                           | Open an existing record — `--all`, `--body <field>`, `-c`/`--commit`               |
+| `hstack status`                                                              | List open edits for the active profile                                             |
+| `hstack commit [<id>]`                                                       | Validate and write back — `--force` to drop the `ifVersion` fence                  |
+| `hstack discard [<id>]`                                                      | Abandon a working copy — `--stale` to sweep stale locks                            |
+| `hstack rm <id>`                                                             | Soft-delete — `--hard` to purge (owner-only on a server)                           |
+| `hstack restore <id>`                                                        | Undelete                                                                           |
+| `hstack versions <id>`                                                       | Version history                                                                    |
+| `hstack tag add\|rm <id> <label>`                                            | Add or remove a tag                                                                |
+| `hstack link add\|rm <id> --label <l> (...)`                                 | Add or remove a relationship (above)                                               |
+| `hstack perm add\|rm <id> (...)`                                             | Grant, merge, narrow, or drop a record permission (above)                          |
+| `hstack grant add\|rm <typeId> (...) <action>...` / `hstack grant ls`        | Type-level grants (above)                                                          |
+| `hstack attach`                                                              | Attachments outside an edit session — Phase 6                                      |
 
 Every read command takes `--json`. Every listing command **loops the cursor to
 exhaustion** or honours an explicit `--limit` — `cursor === null` is the only

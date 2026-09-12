@@ -180,19 +180,41 @@ one version), with `patchContent(id, patch, opts)` as the content-only spelling.
 - `total` (removed from `QueryResult` in core 0.27) needed no change — `queryAll` never
   read it.
 
-## Phase 5 — relational porcelain
+## Phase 5 — relational porcelain ✅
 
-- [ ] `hstack tag <id> add|rm <label>`.
-- [ ] `hstack link <id> add|rm` — flags `--label`, and one of `--to-record`
-      (`+ --stack-url`) / `--to-entity` / `--to-external <ns> <id>`; builds core's
-      `RelationshipTarget` union, absent `--stack-url` meaning this stack.
-- [ ] `hstack perm <id> add|rm` — flags `--public` / `--entity <did>` / `--group <id>`,
-      plus `--read` / `--write`; reads, modifies, and writes back the full `Permission[]`
-      (`setPermissions` replaces wholesale).
-- [ ] `hstack grant <typeId> add|rm` (`--entity` / `--group` / `--default`, then
-      `<action>...`) and `hstack grant ls` — enforce the matching-scope-read dependency
-      before `stack.grant`.
-- [ ] Reference-creation-gating errors reworded ("can't reference X, can't read it").
+Verb-first subcommands throughout (`tag add <id> <label>`, matching `stack add`/`types
+show` rather than the sketch's `tag <id> add <label>`).
+
+- [x] `src/commands/associations.ts` — `tagAdd`/`tagRemove` (`stack.associate`/
+      `dissociate`, idempotent, pre-checked against `stack.get` for a consistent "No
+      record" message). `buildRelationshipTarget` builds core's `RelationshipTarget`
+      union from `--to-record` (`+ --stack-url`) / `--to-entity` / a pair of flags,
+      `--to-external <ns>` plus `--external-id <id>` — two flags rather than one taking
+      two values, since commander has no clean way to parse `<ns> <id>` off one option.
+      `linkAdd`/`linkRemove` wrap associate/dissociate with it. `rm` takes the same
+      target flags `add` did, since `dissociate()` matches a target exactly.
+- [x] `src/commands/access.ts` — `permAdd`/`permRemove`: an entry is keyed by `public` /
+      `entity:<did>` / `group:<id>:<role|member>`; `add` reads the record's
+      `Permission[]`, **merges** access bits into a matching entry (OR, never resets),
+      and writes back via `mutate({ permissions })` (`setPermissions()` is gone — see
+      the dependency-bump note above); `rm` **narrows** a named bit or drops the whole
+      entry once neither bit survives. `grantAdd`/`grantRemove`/`grantList` wrap
+      `stack.grant`/`revoke`/`listGrants` directly — **no client-side dependency
+      check**: core's `checkGrantsValid` already enforces "a `-any`/`-own` mutate action
+      needs a matching-scope read action in the same grant" and names the missing one,
+      so duplicating it client-side would risk disagreeing with the answer that
+      actually governs the write. Same reasoning applies to `perm`'s own
+      write-requires-read rule, also left to core.
+- [x] **Dropped**: reference-creation-gating error rewording. The refusal for an
+      unreadable vs. a missing target is deliberately indistinguishable (the anti-oracle
+      property core documents) — inventing a more specific CLI message would leak
+      exactly the distinction the server declines to make. The plain permission error
+      core/the server already returns is the honest answer.
+- [x] `cli.ts` wires `tag add|rm`, `link add|rm`, `perm add|rm`, `grant add|rm|ls`.
+- [x] Tests: `associations`, `access` (incl. merge/narrow semantics and core's grant- and
+      permission-dependency errors surfacing unmodified). The sandbox's
+      `scripts/exercise-relations.ts` (`pnpm exercise:relations`) dogfoods all four
+      against a real `LocalAdapter` stack; the binary was separately checked end to end.
 
 ## Phase 6 — attachments
 

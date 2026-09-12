@@ -22,6 +22,17 @@ export {
 export type { ListOptions, ShowOptions } from './commands/records.js';
 export { stackAdd, stackList, stackUse, stackRemove } from './commands/stack.js';
 
+export {
+  tagAdd,
+  tagRemove,
+  linkAdd,
+  linkRemove,
+  buildRelationshipTarget,
+} from './commands/associations.js';
+export type { LinkTargetOptions } from './commands/associations.js';
+export { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
+export type { PermTargetOptions, GrantTargetOptions } from './commands/access.js';
+
 export { newRecord, editRecord, editStatus, commitEdit, discardEdit } from './commands/edit.js';
 export type { StartResult, NewOptions, CommitOptions, CommitOutcome } from './commands/edit.js';
 export {

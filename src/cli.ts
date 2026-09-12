@@ -10,6 +10,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Command, InvalidArgumentError } from 'commander';
+import type { GrantAction } from '@haverstack/core';
 import { openStack } from './openStack.js';
 import { loadConfig } from './config.js';
 import { formatBanner } from './banner.js';
@@ -36,6 +37,8 @@ import {
   resolveEditorCommand,
 } from './edit/editor.js';
 import { stackAdd, stackList, stackRemove, stackUse } from './commands/stack.js';
+import { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
+import { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   version: string;
@@ -353,11 +356,221 @@ program
     }
   });
 
+// --- associations, permissions, grants -------------------------------------
+
+const tag = program.command('tag').description('Add or remove a tag');
+
+tag
+  .command('add <id> <label>')
+  .description('Tag a record')
+  .action(async function (this: Command, id: string, label: string) {
+    const opened = await open(this);
+    try {
+      out(await tagAdd(opened.stack, id, label));
+    } finally {
+      await opened.close();
+    }
+  });
+
+tag
+  .command('rm <id> <label>')
+  .description('Untag a record')
+  .action(async function (this: Command, id: string, label: string) {
+    const opened = await open(this);
+    try {
+      out(await tagRemove(opened.stack, id, label));
+    } finally {
+      await opened.close();
+    }
+  });
+
+const link = program.command('link').description('Add or remove a relationship association');
+
+function linkOptions(cmd: Command) {
+  return cmd
+    .requiredOption('--label <label>', 'the relationship label')
+    .option('--to-record <id>', 'target a record in this stack (or another, with --stack-url)')
+    .option('--stack-url <url>', 'the target record lives in this other stack')
+    .option('--to-entity <did>', 'target an identity')
+    .option('--to-external <ns>', 'target something outside any stack, in this namespace')
+    .option('--external-id <id>', 'the identifier within --to-external’s namespace');
+}
+
+type LinkCliOptions = {
+  label: string;
+  toRecord?: string;
+  stackUrl?: string;
+  toEntity?: string;
+  toExternal?: string;
+  externalId?: string;
+};
+
+linkOptions(link.command('add <id>'))
+  .description('Link a record to a target')
+  .action(async function (this: Command, id: string, opts: LinkCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await linkAdd(opened.stack, id, opts.label, {
+          toRecord: opts.toRecord,
+          stackUrl: opts.stackUrl,
+          toEntity: opts.toEntity,
+          toExternalNs: opts.toExternal,
+          externalId: opts.externalId,
+        }),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+linkOptions(link.command('rm <id>'))
+  .description('Remove a link (same target flags as when it was added)')
+  .action(async function (this: Command, id: string, opts: LinkCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await linkRemove(opened.stack, id, opts.label, {
+          toRecord: opts.toRecord,
+          stackUrl: opts.stackUrl,
+          toEntity: opts.toEntity,
+          toExternalNs: opts.toExternal,
+          externalId: opts.externalId,
+        }),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+const perm = program.command('perm').description('Add or remove a record permission');
+
+function permOptions(cmd: Command) {
+  return cmd
+    .option('--public', 'anyone may access it')
+    .option('--entity <did>', 'grant this identity access')
+    .option('--group <id>', 'grant this group access')
+    .option('--role <role>', 'restrict a --group entry to admins ("admin")')
+    .option('--read', 'grant read access')
+    .option('--write', 'grant write access');
+}
+
+type PermCliOptions = {
+  public?: boolean;
+  entity?: string;
+  group?: string;
+  role?: string;
+  read?: boolean;
+  write?: boolean;
+};
+
+function permTarget(opts: PermCliOptions) {
+  if (opts.role && opts.role !== 'admin') throw new InvalidArgumentError('--role must be "admin"');
+  return {
+    public: opts.public,
+    entity: opts.entity,
+    group: opts.group,
+    role: opts.role as 'admin' | undefined,
+  };
+}
+
+permOptions(perm.command('add <id>'))
+  .description('Grant record-level access')
+  .action(async function (this: Command, id: string, opts: PermCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await permAdd(opened.stack, id, permTarget(opts), Boolean(opts.read), Boolean(opts.write)),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+permOptions(perm.command('rm <id>'))
+  .description('Remove or narrow record-level access')
+  .action(async function (this: Command, id: string, opts: PermCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await permRemove(
+          opened.stack,
+          id,
+          permTarget(opts),
+          Boolean(opts.read),
+          Boolean(opts.write),
+        ),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+const grant = program.command('grant').description('Add, remove, or list type-level grants');
+
+function grantOptions(cmd: Command) {
+  return cmd
+    .option('--entity <did>', 'grant this identity')
+    .option('--group <id>', 'grant this group')
+    .option('--default', 'grant any authenticated entity');
+}
+
+type GrantCliOptions = { entity?: string; group?: string; default?: boolean };
+
+grantOptions(grant.command('add <typeId> <actions...>'))
+  .description('Grant create/read/update/delete on a type family')
+  .action(async function (this: Command, typeId: string, actions: string[], opts: GrantCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await grantAdd(
+          opened.stack,
+          typeId,
+          { entity: opts.entity, group: opts.group, isDefault: opts.default },
+          actions as GrantAction[],
+        ),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+grantOptions(grant.command('rm <typeId> <actions...>'))
+  .description('Revoke actions granted on a type family')
+  .action(async function (this: Command, typeId: string, actions: string[], opts: GrantCliOptions) {
+    const opened = await open(this);
+    try {
+      out(
+        await grantRemove(
+          opened.stack,
+          typeId,
+          { entity: opts.entity, group: opts.group, isDefault: opts.default },
+          actions as GrantAction[],
+        ),
+      );
+    } finally {
+      await opened.close();
+    }
+  });
+
+grant
+  .command('ls')
+  .description('List grants')
+  .option('--type <typeId>', 'only this type')
+  .action(async function (this: Command, opts: { type?: string }) {
+    const opened = await open(this);
+    try {
+      out(await grantList(opened.stack, opts.type));
+    } finally {
+      await opened.close();
+    }
+  });
+
 program.addHelpText(
   'after',
   `
 Planned command groups (see docs/design.md § Command surface):
-  tag | link | attach | perm | grant         associations, permissions, grants
+  attach                     files as attachments outside an edit session
 `,
 );
 
