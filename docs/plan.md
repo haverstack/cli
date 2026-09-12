@@ -216,13 +216,38 @@ show` rather than the sketch's `tag <id> add <label>`).
       `scripts/exercise-relations.ts` (`pnpm exercise:relations`) dogfoods all four
       against a real `LocalAdapter` stack; the binary was separately checked end to end.
 
-## Phase 6 — attachments
+## Phase 6 — attachments ✅
 
-- [ ] `hstack attach <id> add --label <l> --file <p>` / `rm --label <l> --file-id <sha>`.
-- [ ] Working-dir attachment reconcile in `commit`: upload new (`putAttachment`),
-      associate, dissociate removed; content-addressed skip for unchanged.
-- [ ] Download `embed` attachments on `hstack edit` (done in Phase 4; verify round-trip
-      here).
+- [x] `src/commands/attach.ts` — `attachAdd`/`attachRemove` (verb-first, matching Phase
+      5): `add <id> --label <l> --file <p>` reads the file, guesses its mimeType via
+      core/wire's `inferContentTypeFromFilename` (falling back to
+      `application/octet-stream`), `putAttachment`s it, and `associate`s the result;
+      `rm <id> --label <l> --file-id <sha>` dissociates by the exact `(label, fileId)`
+      pair `dissociate()` needs.
+- [x] `src/edit/attachments.ts` gained `reconcileAttachments(stack, id, dir)`: hashes
+      every file in the working dir (excluding `record.md`/the lock — now
+      `RESERVED_WORKING_FILES`, exported from `lock.ts`) with sha256 — the fileId itself,
+      so a file already present as an `embed` is skipped outright, no re-upload. A new
+      hash is uploaded + associated; an embedded hash no file still holds is dissociated
+      (never deletes bytes — `collectAttachmentGarbage` owns that, separately). A
+      read/upload/associate failure on one file is a warning, never a blocked commit.
+      `downloadEmbeds` (Phase 4) refactored onto core's `getAttachmentRecords(fileId)`
+      (added upstream since Phase 4, already earliest-first) in place of a hand-rolled
+      `queryAll` + sort.
+- [x] `commitEdit` calls `reconcileAttachments` after tag reconcile, for **both** `new`
+      and `edit` — a file dropped before the first commit is embedded on the record's
+      first write, not just on a later edit. Fixed along the way: the `new` branch's
+      reported version was stale whenever the embed write actually landed (it only
+      re-fetched on a warning); now it always re-fetches, matching the `edit` branch.
+- [x] `cli.ts` wires `attach add|rm`.
+- [x] Tests: `attachments` (`downloadEmbeds`/`reconcileAttachments` incl. mime inference,
+      content-addressed no-op, dissociate-on-removal, unrelated-association isolation,
+      unreadable-file-as-warning), `attach` (the command layer), plus two `edit-commit`
+      cases proving the working-dir path end to end. The sandbox's
+      `scripts/exercise-attach.ts` (`pnpm exercise:attach`) dogfoods the full lifecycle
+      against a real `LocalAdapter` stack; the binary was separately checked end to end
+      (a scripted editor that both edits `record.md` and drops a file, `edit` downloading
+      it back, deleting it and re-committing to dissociate).
 
 ## Phase 7 — type registration
 

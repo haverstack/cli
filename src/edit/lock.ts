@@ -53,6 +53,9 @@ export class EditInProgressError extends Error {
 const LOCK_FILE = '.hstack-lock.json';
 const RECORD_FILE = 'record.md';
 
+/** Filenames reserved by the working directory itself — never an attachment. */
+export const RESERVED_WORKING_FILES: readonly string[] = [LOCK_FILE, RECORD_FILE];
+
 function stackKey(stackLabel: string): string {
   return createHash('sha256').update(stackLabel).digest('hex').slice(0, 12);
 }

@@ -1,3 +1,5 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Stack } from '@haverstack/core';
 import { MemoryAdapter } from '@haverstack/core/testing';
@@ -189,5 +191,44 @@ describe('discard', () => {
     expect(await discardEdit(LABEL, undefined, { stale: true })).toMatch(/Discarded 1 stale/);
     const { listEdits } = await import('../src/edit/lock.js');
     expect(await listEdits(LABEL)).toHaveLength(1);
+  });
+});
+
+describe('working-directory attachments', () => {
+  it('a file dropped before the first commit becomes an embed on the new record', async () => {
+    const started = await newRecord(stack, LABEL, 'com.example/note@1', {});
+    await fill(
+      started.dir,
+      { id: started.recordId, type: 'com.example/note@1', tags: '[]', title: 'With photo' },
+      'body',
+    );
+    await writeFile(join(started.dir, 'photo.png'), 'bytes');
+
+    const outcome = await commitEdit(stack, LABEL, started.recordId, {});
+    expect(outcome.ok).toBe(true);
+    const record = await stack.get(started.recordId);
+    expect(record?.associations).toHaveLength(1);
+    // create() lands at v1; the embed associate is a second write the
+    // reported version must reflect, not create()'s own v1.
+    expect(outcome.message).toContain(`v${record?.version}`);
+    expect(record?.version).toBeGreaterThan(1);
+  });
+
+  it('a file dropped during a later edit is embedded, and removing it dissociates', async () => {
+    const rec = await stack.create('com.example/note@1', { title: 'x', text: 'y' });
+
+    const a = await editRecord(stack, LABEL, rec.id);
+    await writeFile(join(a.dir, 'doc.txt'), 'hello');
+    await commitEdit(stack, LABEL, rec.id, {});
+    expect((await stack.get(rec.id))?.associations).toHaveLength(1);
+
+    // Re-edit: the file is downloaded back into the new working dir. Delete
+    // it there and commit — the embed should disappear.
+    const b = await editRecord(stack, LABEL, rec.id);
+    expect(await readFile(join(b.dir, 'doc.txt'), 'utf8')).toBe('hello');
+    const { rm } = await import('node:fs/promises');
+    await rm(join(b.dir, 'doc.txt'));
+    await commitEdit(stack, LABEL, rec.id, {});
+    expect((await stack.get(rec.id))?.associations ?? []).toEqual([]);
   });
 });

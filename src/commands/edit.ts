@@ -19,7 +19,7 @@ import {
 } from '../record/format.js';
 import { scaffoldRecord } from '../record/scaffold.js';
 import { parseRecord, RecordParseError } from '../record/parse.js';
-import { downloadEmbeds } from '../edit/attachments.js';
+import { downloadEmbeds, reconcileAttachments } from '../edit/attachments.js';
 import { iso } from '../util.js';
 import {
   acquireEdit,
@@ -152,12 +152,17 @@ export async function commitEdit(
         id: parsed.id ?? data.recordId,
         parentId: parsed.parentId ?? undefined,
       });
-      // Each tag associate bumps the version, so the final count comes from
-      // the last write, not from create().
+      // Tag and attachment associates each bump the version, so the report
+      // below needs whatever the record actually ended on, not create()'s.
       for (const label of parsed.tags)
         record = await stack.associate(record.id, { kind: 'tag', label });
+      const warnings = await reconcileAttachments(stack, record.id, dir);
+      const final = (await stack.get(record.id)) ?? record;
       await releaseEdit(dir);
-      return { ok: true, message: `Created ${record.id} (${data.typeId}), v${record.version}.` };
+      return {
+        ok: true,
+        message: withWarnings(`Created ${final.id} (${data.typeId}), v${final.version}.`, warnings),
+      };
     }
 
     const record = await stack.get(data.recordId);
@@ -166,17 +171,22 @@ export async function commitEdit(
     const patch = buildPatch(record.content, parsed.content);
     // mutate() carries content and parentId in one fenced, one-version
     // write; core checks the destination exists and refuses a cycle. Tag
-    // reconcile runs after (associations are set-merged, not fenced), so
-    // re-read for the version the record actually ended on.
+    // and attachment reconcile run after (associations are set-merged, not
+    // fenced), so a final re-read reports the version the record actually
+    // ended on.
     await stack.mutate(
       data.recordId,
       { contentPatch: patch, parentId: parsed.parentId },
       { ifVersion: opts.force ? undefined : data.baseVersion },
     );
     await reconcileTags(stack, record, parsed.tags);
+    const warnings = await reconcileAttachments(stack, data.recordId, dir);
     await releaseEdit(dir);
     const final = await stack.get(data.recordId);
-    return { ok: true, message: `Committed ${data.recordId}, v${final?.version ?? '?'}.` };
+    return {
+      ok: true,
+      message: withWarnings(`Committed ${data.recordId}, v${final?.version ?? '?'}.`, warnings),
+    };
   } catch (err) {
     // Match on the stable `code` rather than `instanceof`: a linked dev
     // setup can load two copies of @haverstack/core, and the stack's errors
@@ -209,6 +219,10 @@ export async function commitEdit(
 function stackErrorCode(err: unknown): string | undefined {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === 'string' ? code : undefined;
+}
+
+function withWarnings(base: string, warnings: string[]): string {
+  return warnings.length > 0 ? [base, ...warnings.map((w) => `  ! ${w}`)].join('\n') : base;
 }
 
 // ---------------------------------------------------------------- discard

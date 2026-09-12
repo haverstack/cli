@@ -386,14 +386,23 @@ since a copy could disagree with the answer that actually governs the write. Gra
 - **Files dropped in the working directory** become `attachment` associations on
   `commit`, label `embed` (the commons convention for files referenced from body text).
   This is the whole media workflow for an editing session: the working dir is already
-  open in a file manager next to the editor.
-- **`hstack attach <id> add --label <l> --file <p>`** / **`rm --label <l> --file-id
-<sha256>`** for attaching outside an edit session, or with a non-`embed` label.
+  open in a file manager next to the editor. `hstack edit` downloads a record's existing
+  embeds into the working dir first, so it's a faithful starting point either way.
+- **`hstack attach add <id> --label <l> --file <p>`** / **`attach rm <id> --label <l>
+--file-id <sha256>`** for attaching outside an edit session, or with a non-`embed`
+  label. `add`'s mimeType is guessed from the extension (core's own
+  `inferContentTypeFromFilename`, the same table a server uses when serving a download),
+  falling back to `application/octet-stream`.
 
-On commit, attachments in the working dir are reconciled against the record's existing
-`embed` attachments: new files are uploaded (`putAttachment`) and associated, files
-removed from the dir are dissociated. Content addressing makes re-uploading an unchanged
-file a no-op.
+On commit, files in the working dir are reconciled against the record's current `embed`
+attachments by **content, not filename**: a file's sha256 _is_ its fileId, so a file
+already present as an embed is skipped outright — no re-upload, no wasted write. A new
+hash is uploaded (`putAttachment`) and associated; an embedded hash no file in the
+directory still holds is dissociated (never deleted — that is `collectAttachmentGarbage`'s
+job, on its own grace period, not commit's). This runs for `new` as much as `edit`: a
+file dropped into a not-yet-committed working directory is embedded on the record's first
+write. A read or write failure on one file is a warning appended to the commit message,
+never a blocked commit — the same posture `downloadEmbeds` already took.
 
 ### Reference-creation gating
 
@@ -431,7 +440,7 @@ gives, not to invent a more specific one the server never promised.
 | `hstack link add\|rm <id> --label <l> (...)`                                 | Add or remove a relationship (above)                                               |
 | `hstack perm add\|rm <id> (...)`                                             | Grant, merge, narrow, or drop a record permission (above)                          |
 | `hstack grant add\|rm <typeId> (...) <action>...` / `hstack grant ls`        | Type-level grants (above)                                                          |
-| `hstack attach`                                                              | Attachments outside an edit session — Phase 6                                      |
+| `hstack attach add\|rm <id> --label <l> (...)`                               | Attach or detach a file outside an edit session (above)                            |
 
 Every read command takes `--json`. Every listing command **loops the cursor to
 exhaustion** or honours an explicit `--limit` — `cursor === null` is the only

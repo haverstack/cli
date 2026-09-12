@@ -32,6 +32,7 @@ export {
 export type { LinkTargetOptions } from './commands/associations.js';
 export { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
 export type { PermTargetOptions, GrantTargetOptions } from './commands/access.js';
+export { attachAdd, attachRemove } from './commands/attach.js';
 
 export { newRecord, editRecord, editStatus, commitEdit, discardEdit } from './commands/edit.js';
 export type { StartResult, NewOptions, CommitOptions, CommitOutcome } from './commands/edit.js';
@@ -46,6 +47,7 @@ export {
   readEditFile,
   writeEditFile,
   EditInProgressError,
+  RESERVED_WORKING_FILES,
 } from './edit/lock.js';
 export type { LockData, OpenEdit, EditMode } from './edit/lock.js';
 export {
@@ -54,7 +56,7 @@ export {
   launchExplorer,
   NoEditorError,
 } from './edit/editor.js';
-export { downloadEmbeds } from './edit/attachments.js';
+export { downloadEmbeds, reconcileAttachments } from './edit/attachments.js';
 
 export {
   renderRecord,

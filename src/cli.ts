@@ -39,6 +39,7 @@ import {
 import { stackAdd, stackList, stackRemove, stackUse } from './commands/stack.js';
 import { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
 import { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
+import { attachAdd, attachRemove } from './commands/attach.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   version: string;
@@ -566,13 +567,35 @@ grant
     }
   });
 
-program.addHelpText(
-  'after',
-  `
-Planned command groups (see docs/design.md § Command surface):
-  attach                     files as attachments outside an edit session
-`,
-);
+const attach = program.command('attach').description('Attach a file outside an edit session');
+
+attach
+  .command('add <id>')
+  .description('Attach a file, uploading it')
+  .requiredOption('--label <label>', 'the attachment label (e.g. "embed", "avatar")')
+  .requiredOption('--file <path>', 'the file to upload')
+  .action(async function (this: Command, id: string, opts: { label: string; file: string }) {
+    const opened = await open(this);
+    try {
+      out(await attachAdd(opened.stack, id, opts.label, opts.file));
+    } finally {
+      await opened.close();
+    }
+  });
+
+attach
+  .command('rm <id>')
+  .description('Detach a file (the fileId from `hstack show --json`)')
+  .requiredOption('--label <label>', 'the attachment label')
+  .requiredOption('--file-id <sha256>', 'the attachment’s fileId')
+  .action(async function (this: Command, id: string, opts: { label: string; fileId: string }) {
+    const opened = await open(this);
+    try {
+      out(await attachRemove(opened.stack, id, opts.label, opts.fileId));
+    } finally {
+      await opened.close();
+    }
+  });
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   note(err instanceof Error ? err.message : String(err));
