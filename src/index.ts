@@ -11,7 +11,7 @@ export type { OpenedStack, StackMode, OpenStackOptions } from './openStack.js';
 export { formatBanner } from './banner.js';
 export { queryAll } from './paginate.js';
 
-export { collectTypes, formatTypes, showType } from './commands/types.js';
+export { collectTypes, formatTypes, showType, typesDefine } from './commands/types.js';
 export {
   listRecords,
   showRecord,

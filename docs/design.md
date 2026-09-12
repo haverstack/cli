@@ -459,10 +459,11 @@ schema, { migratesFrom })`.
 
 Registering an identical schema (same `schemaHash` and `name`) returns before any write,
 so re-running a define script is cheap. An illegal schema change on an existing `id`
-throws `StackSchemaDriftError`, which names each violation; the CLI prints it verbatim
-and states the remedy — a new version (`…@n+1`) plus, in app code, a migration — rather
-than making the user go read about drift. Additive-in-place evolution (new optional
-fields only) is accepted without a version bump, matching core.
+throws `StackSchemaDriftError`; the CLI does not catch it or re-derive its own message —
+core's already names every violation and states the remedy (a new version, `…@n+1`, plus,
+in app code, a migration) — so it propagates verbatim rather than the CLI making the user
+go read about drift. Additive-in-place evolution (new optional fields only) is accepted
+without a version bump, matching core.
 
 Migration _functions_ stay out of scope: `registerMigration` takes a JS closure, and
 `commitMigration` / `migrateAll` are owner-acting-alone operations best driven from the

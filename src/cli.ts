@@ -14,7 +14,7 @@ import type { GrantAction } from '@haverstack/core';
 import { openStack } from './openStack.js';
 import { loadConfig } from './config.js';
 import { formatBanner } from './banner.js';
-import { collectTypes, formatTypes, showType } from './commands/types.js';
+import { collectTypes, formatTypes, showType, typesDefine } from './commands/types.js';
 import {
   listRecords,
   recordVersions,
@@ -157,6 +157,18 @@ types
     const opened = await open(this);
     try {
       out(await showType(opened.stack, typeId, Boolean(opts.json)));
+    } finally {
+      await opened.close();
+    }
+  });
+
+types
+  .command('define <schemaFile>')
+  .description('Register (or additively extend) a type from a schema file')
+  .action(async function (this: Command, schemaFile: string) {
+    const opened = await open(this);
+    try {
+      out(await typesDefine(opened.stack, schemaFile));
     } finally {
       await opened.close();
     }

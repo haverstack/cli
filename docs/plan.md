@@ -249,11 +249,27 @@ show` rather than the sketch's `tag <id> add <label>`).
       (a scripted editor that both edits `record.md` and drops a file, `edit` downloading
       it back, deleting it and re-committing to dissociate).
 
-## Phase 7 — type registration
+## Phase 7 — type registration ✅
 
-- [ ] `hstack types define <schema.json>` — `{ id, name, schema, migratesFrom? }` →
-      `defineType`. Idempotent no-op on identical schema.
-- [ ] Surface `StackSchemaDriftError` verbatim + state the version-bump remedy.
+- [x] `src/commands/types.ts` gained `typesDefine(stack, filePath)`: reads
+      `{ id, name, schema, migratesFrom? }` from a JSON file, pre-validates its shape
+      (non-empty string `id`/`name`, object `schema`, optional string `migratesFrom`) so a
+      malformed file names the exact field rather than failing deeper in `defineType`, then
+      calls `stack.defineType`. Compares `getType(id)` before and after the call to report
+      which of four outcomes happened: brand-new registration, an idempotent no-op
+      (identical schemaHash + name), a name-only rename (identical schemaHash), or a legal
+      additive-in-place extension (new hash, no drift). `StackSchemaDriftError` is not
+      caught — core's own message already lists every violation and states the
+      version-bump remedy with a concrete `defineType(...)` example, so the CLI adds
+      nothing and lets it propagate to `cli.ts`'s top-level handler.
+- [x] `cli.ts` wires `types define <schemaFile>` alongside the existing `types show`.
+- [x] Tests cover fresh registration, `migratesFrom` propagation, the idempotent/rename/
+      additive-evolution paths, verbatim drift-error surfacing (remedy text included), and
+      each malformed-input rejection. All checks green. The sandbox's
+      `scripts/exercise-typesdefine.ts` (`pnpm exercise:typesdefine`) dogfoods all four
+      outcomes plus the drift error against a real `LocalAdapter` stack; the binary was
+      separately checked end to end against the seeded sandbox stack, then `pnpm reseed`
+      restored it.
 
 ## Phase 8 — integration, docs, release
 
