@@ -91,9 +91,14 @@ async function afterStart(
   }
   const config = await loadConfig();
   const editor = resolveEditorCommand(config);
+  const explorer = config.explorer || opts.explorer;
 
   if (opts.commit) {
     if (!editor) throw new NoEditorError();
+    // Before the editor, which blocks: opened after, a file manager would
+    // only ever appear once you'd already closed the thing you wanted it
+    // open alongside.
+    if (explorer) launchExplorer(started.dir);
     launchEditor(editor, started.file, true);
     const outcome = await commitEdit(opened.stack, opened.target, started.recordId, {});
     out(outcome.message);
@@ -111,8 +116,8 @@ async function afterStart(
   // has one itself — a script or agent driving hstack as a subprocess
   // never does, and must ask for --wait explicitly to get it anyway.
   const wait = opts.wait ?? (isInteractiveTerminal() && isTuiEditorCommand(editor));
+  if (explorer) launchExplorer(started.dir);
   launchEditor(editor, started.file, wait);
-  if (config.explorer || opts.explorer) launchExplorer(started.dir);
   out(
     wait
       ? `Done editing ${started.recordId}. Run \`hstack commit\` when ready.\n  ${started.file}`

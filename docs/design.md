@@ -212,11 +212,13 @@ override the guess). A script or agent driving `hstack` as a subprocess never ha
 so it gets the same detached, immediately-returning behavior regardless of `$EDITOR`,
 without needing to know about any flag. Waiting this way still doesn't commit anything —
 that's `-c` / `--commit`'s job, which always waits _and_ commits once the editor exits,
-the one-shot `git commit` feel. A file manager on the working dir opens alongside the
-editor when `explorer = true` is set in `config.toml` (a standing preference) or
-`--explorer` is passed for just this call (e.g. to drop an attachment before
-committing) — off by default either way. The editor is `config.editor`, else `$VISUAL`,
-else `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
+the one-shot `git commit` feel. A file manager on the working dir opens **before** the
+editor — including before a blocking one — when `explorer = true` is set in
+`config.toml` (a standing preference) or `--explorer` is passed for just this call (e.g.
+to drop an attachment before committing); off by default either way. Opening it first is
+deliberate: opened after, it would only ever appear once you'd already closed the editor
+you wanted it open alongside. The editor is `config.editor`, else `$VISUAL`, else
+`$EDITOR`; with none set, `new`/`edit` just print the file path to open.
 
 **`parentId` moves with the record.** Core's `mutate()` carries a content patch and a
 `parentId` in one fenced, one-version write, so editing the `parentId` line and
