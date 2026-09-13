@@ -1,5 +1,17 @@
 # @haverstack/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- [`4ee536b`](https://github.com/haverstack/cli/commit/4ee536b7d85f616f1b3867415272f84568d99c96) Thanks [@cuibonobo](https://github.com/cuibonobo)! - Attachment associations now name the specific upload they came from
+  (`attachmentRecordId`, added in `@haverstack/core@0.32.0`), fixing a real bug: two
+  records referencing byte-identical content uploaded under different filenames used to
+  both show whichever name was uploaded first, everywhere — in `hstack edit`'s downloaded
+  working-dir filename and in `_readonly`'s attachment associations (which now also show a
+  resolved `filename` for the first time). Each record now correctly shows its own name.
+  Requires `@haverstack/core@^0.32.0` and `adapter-local`/`adapter-api@^0.31.0`.
+
 ## 0.2.0
 
 ### Minor Changes
