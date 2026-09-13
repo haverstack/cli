@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { launchEditor, NoEditorError, resolveEditorCommand } from '../src/edit/editor.js';
+import {
+  launchEditor,
+  isTuiEditorCommand,
+  isInteractiveTerminal,
+  NoEditorError,
+  resolveEditorCommand,
+} from '../src/edit/editor.js';
 
 const saved = { VISUAL: process.env.VISUAL, EDITOR: process.env.EDITOR };
 beforeEach(() => {
@@ -37,5 +43,43 @@ describe('launchEditor', () => {
 
   it('surfaces a spawn error for a missing binary in wait mode', () => {
     expect(() => launchEditor('definitely-not-an-editor-xyz', '/tmp/x', true)).toThrow();
+  });
+});
+
+describe('isTuiEditorCommand', () => {
+  it('recognizes common terminal editors regardless of path or args', () => {
+    expect(isTuiEditorCommand('nano')).toBe(true);
+    expect(isTuiEditorCommand('/usr/bin/vim')).toBe(true);
+    expect(isTuiEditorCommand('nvim +42')).toBe(true);
+  });
+
+  it('treats GUI editors as not needing a terminal', () => {
+    expect(isTuiEditorCommand('code --wait')).toBe(false);
+    expect(isTuiEditorCommand('subl -w')).toBe(false);
+    expect(isTuiEditorCommand('')).toBe(false);
+  });
+
+  it('special-cases emacs on the presence of -nw', () => {
+    expect(isTuiEditorCommand('emacs')).toBe(false);
+    expect(isTuiEditorCommand('emacs -nw')).toBe(true);
+    expect(isTuiEditorCommand('emacs --no-window-system')).toBe(true);
+  });
+});
+
+describe('isInteractiveTerminal', () => {
+  it('reflects whether both stdin and stdout are a real tty', () => {
+    const savedIn = process.stdin.isTTY;
+    const savedOut = process.stdout.isTTY;
+    try {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      expect(isInteractiveTerminal()).toBe(true);
+
+      Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+      expect(isInteractiveTerminal()).toBe(false);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: savedIn, configurable: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: savedOut, configurable: true });
+    }
   });
 });

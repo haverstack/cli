@@ -54,6 +54,8 @@ export {
   resolveEditorCommand,
   launchEditor,
   launchExplorer,
+  isTuiEditorCommand,
+  isInteractiveTerminal,
   NoEditorError,
 } from './edit/editor.js';
 export { downloadEmbeds, reconcileAttachments } from './edit/attachments.js';

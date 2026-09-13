@@ -17,6 +17,52 @@ function tokenize(command: string): string[] {
   return command.trim().split(/\s+/).filter(Boolean);
 }
 
+/** "/usr/bin/vim" -> "vim". */
+function commandBasename(cmd: string): string {
+  return (cmd.split(/[\\/]/).pop() ?? cmd).toLowerCase();
+}
+
+const TUI_EDITOR_NAMES = new Set([
+  'vi',
+  'vim',
+  'nvim',
+  'nano',
+  'pico',
+  'ne',
+  'jed',
+  'joe',
+  'mcedit',
+  'micro',
+  'hx',
+  'kak',
+  'ed',
+]);
+
+/**
+ * Best-effort guess at whether `command` needs a real controlling terminal
+ * to run at all, as opposed to opening its own window — used only to pick
+ * a default for `--wait`, never authoritative: `--wait`/`--no-wait` always
+ * override it. `emacs` goes either way depending on `-nw`.
+ */
+export function isTuiEditorCommand(command: string): boolean {
+  const parts = tokenize(command);
+  const name = commandBasename(parts[0] ?? '');
+  if (name === 'emacs' || name === 'emacsclient') {
+    return parts.some((p) => p === '-nw' || p === '--no-window-system');
+  }
+  return TUI_EDITOR_NAMES.has(name);
+}
+
+/**
+ * Whether this process itself has a real terminal on both ends — the
+ * signal that distinguishes a human at a shell (safe to default a TUI
+ * editor to `--wait`) from a script or agent driving `hstack` as a
+ * subprocess (never safe to assume that, regardless of $EDITOR).
+ */
+export function isInteractiveTerminal(): boolean {
+  return Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+}
+
 export class NoEditorError extends Error {
   constructor() {
     super('No editor configured. Set `editor` in config.toml, or $VISUAL / $EDITOR.');

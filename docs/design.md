@@ -202,14 +202,21 @@ a layout bug.
 | `hstack discard [<id>]`                           | Delete the working dir and lock. Never touches the stack. `--stale` sweeps every stale edit.                                                                                                                                                                                |
 
 `hstack new` / `hstack edit` return once the working directory exists and hand the editor
-launch to the CLI: by default the editor is spawned **detached** and the process exits,
-releasing any lock on a local file. A file manager on the working dir opens alongside it
-when `explorer = true` is set in `config.toml` (a standing preference) or `--explorer` is
-passed for just this call (e.g. to drop an attachment before committing) — off by
-default either way, since a detached GUI file manager makes no sense over SSH. `-c` /
-`--commit` instead waits for the editor to exit and then commits — the one-shot `git
-commit` feel, for a terminal editor. The editor is `config.editor`, else `$VISUAL`, else
-`$EDITOR`; with none set, `new`/`edit` just print the file path to open.
+launch to the CLI. A GUI editor is spawned **detached**, releasing any lock on a local
+file immediately — the process exits and you keep working elsewhere until you're ready
+to `commit`. A terminal editor (`nano`, `vim`, ...) can't run detached at all — it has no
+window of its own, so without a controlling terminal it has nothing to draw into and
+just exits — so `hstack` waits for one instead: not on a fixed name list alone, but only
+when this process itself has a real terminal attached (`--wait`/`--no-wait` always
+override the guess). A script or agent driving `hstack` as a subprocess never has one,
+so it gets the same detached, immediately-returning behavior regardless of `$EDITOR`,
+without needing to know about any flag. Waiting this way still doesn't commit anything —
+that's `-c` / `--commit`'s job, which always waits _and_ commits once the editor exits,
+the one-shot `git commit` feel. A file manager on the working dir opens alongside the
+editor when `explorer = true` is set in `config.toml` (a standing preference) or
+`--explorer` is passed for just this call (e.g. to drop an attachment before
+committing) — off by default either way. The editor is `config.editor`, else `$VISUAL`,
+else `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
 
 **`parentId` moves with the record.** Core's `mutate()` carries a content patch and a
 `parentId` in one fenced, one-version write, so editing the `parentId` line and

@@ -33,6 +33,8 @@ import {
 import {
   launchEditor,
   launchExplorer,
+  isInteractiveTerminal,
+  isTuiEditorCommand,
   NoEditorError,
   resolveEditorCommand,
 } from './edit/editor.js';
@@ -81,9 +83,12 @@ async function open(command: Command) {
 async function afterStart(
   opened: Awaited<ReturnType<typeof open>>,
   started: StartResult,
-  opts: { commit?: boolean; explorer?: boolean },
+  opts: { commit?: boolean; wait?: boolean; explorer?: boolean },
 ): Promise<void> {
   for (const w of started.warnings) note(`  ! ${w}`);
+  if (opts.commit && opts.wait === false) {
+    throw new Error('--no-wait contradicts -c/--commit, which always waits for the editor.');
+  }
   const config = await loadConfig();
   const editor = resolveEditorCommand(config);
 
@@ -96,12 +101,22 @@ async function afterStart(
     return;
   }
 
-  if (editor) launchEditor(editor, started.file, false);
+  if (!editor) {
+    out(`No editor configured. Edit this file, then run \`hstack commit\`:\n  ${started.file}`);
+    return;
+  }
+
+  // A terminal editor (nano, vim, ...) can't do anything without a real
+  // controlling terminal, so it only gets one by default when this process
+  // has one itself — a script or agent driving hstack as a subprocess
+  // never does, and must ask for --wait explicitly to get it anyway.
+  const wait = opts.wait ?? (isInteractiveTerminal() && isTuiEditorCommand(editor));
+  launchEditor(editor, started.file, wait);
   if (config.explorer || opts.explorer) launchExplorer(started.dir);
   out(
-    editor
-      ? `Editing ${started.recordId}. Run \`hstack commit\` when done.\n  ${started.file}`
-      : `No editor configured. Edit this file, then run \`hstack commit\`:\n  ${started.file}`,
+    wait
+      ? `Done editing ${started.recordId}. Run \`hstack commit\` when ready.\n  ${started.file}`
+      : `Editing ${started.recordId}. Run \`hstack commit\` when done.\n  ${started.file}`,
   );
 }
 
@@ -252,6 +267,8 @@ program
   .option('--body <field>', 'which text field is the body')
   .option('--minimal', 'scaffold required fields only')
   .option('-c, --commit', 'wait for the editor, then commit')
+  .option('--wait', 'wait for the editor to exit before returning (no auto-commit)')
+  .option('--no-wait', 'never wait, even for a terminal editor (e.g. when scripting hstack)')
   .option('--explorer', 'also open a file manager on the working directory')
   .action(async function (
     this: Command,
@@ -262,6 +279,7 @@ program
       body?: string;
       minimal?: boolean;
       commit?: boolean;
+      wait?: boolean;
       explorer?: boolean;
     },
   ) {
@@ -283,11 +301,13 @@ program
   .command('edit <id>')
   .description('Open an existing record in your editor')
   .option('-c, --commit', 'wait for the editor, then commit')
+  .option('--wait', 'wait for the editor to exit before returning (no auto-commit)')
+  .option('--no-wait', 'never wait, even for a terminal editor (e.g. when scripting hstack)')
   .option('--explorer', 'also open a file manager on the working directory')
   .action(async function (
     this: Command,
     id: string,
-    opts: { commit?: boolean; explorer?: boolean },
+    opts: { commit?: boolean; wait?: boolean; explorer?: boolean },
   ) {
     const opened = await open(this);
     try {
