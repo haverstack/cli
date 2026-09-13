@@ -1,6 +1,6 @@
 {
   "name": "@haverstack/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Type-agnostic terminal tool for editing a Haverstack stack — local SQLite file or remote server",
   "type": "module",
   "bin": {
