@@ -1,5 +1,27 @@
 # @haverstack/cli
 
+## 0.2.0
+
+### Minor Changes
+
+- [`29924dd`](https://github.com/haverstack/cli/commit/29924dd5fe409c40ed494308f9c936889fce08ed) Thanks [@cuibonobo](https://github.com/cuibonobo)! - `--explorer`/`config.toml`'s `explorer = true` now open the file manager _before_ the
+  editor, not after — previously, with a blocking (`-c`, or an auto-waited terminal)
+  editor, the folder didn't appear until you'd already closed the editor you wanted it
+  open alongside. Also fixes `-c`/`--commit` never opening it at all.
+
+- [`5c1c95e`](https://github.com/haverstack/cli/commit/5c1c95e6ac9d57a8b80860d1580b95144a37daa8) Thanks [@cuibonobo](https://github.com/cuibonobo)! - `hstack new`/`hstack edit` gained `--explorer`, opening a file manager on the working
+  directory for just that call (e.g. to drop an attachment before committing). Replaces
+  `--no-explorer`, which negated a default that was already off unless `config.toml` set
+  `explorer = true` — there was no way to ask for the folder without setting that
+  persistently.
+
+- [`9f42543`](https://github.com/haverstack/cli/commit/9f42543e69466761c56c7b797424cff634963e7a) Thanks [@cuibonobo](https://github.com/cuibonobo)! - `hstack new`/`hstack edit` now wait for a terminal editor (`nano`, `vim`, ...) to exit
+  before returning, so it actually gets a controlling terminal to run in — previously it
+  was launched detached like a GUI editor and silently did nothing. The wait only happens
+  when `hstack` itself has a real terminal attached, so a script or agent driving it as a
+  subprocess is unaffected either way. Waiting does not commit; that stays `-c`/`--commit`'s
+  job. Added `--wait`/`--no-wait` to override the guess explicitly in either direction.
+
 ## 0.1.0
 
 ### Minor Changes
