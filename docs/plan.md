@@ -271,15 +271,62 @@ show` rather than the sketch's `tag <id> add <label>`).
       separately checked end to end against the seeded sandbox stack, then `pnpm reseed`
       restored it.
 
-## Phase 8 — integration, docs, release
+## Phase 8 — integration, docs, release ✅
 
-- [ ] Integration tests: full `new → edit → commit → link → rm → restore` against a temp
-      `LocalAdapter` file and against `MemoryAdapter`.
-- [ ] Server-path tests against a spun-up `@haverstack/server` (owner and grantee
-      sessions): permission refusals, `includeUnlisted` denial, `ifVersion` conflicts.
-- [ ] `README.md`: install, `hstack stack add`, the editing loop, `--json` recipes.
-- [ ] `cli-example/` smoke-test script exercised in CI.
-- [ ] First changeset; `0.1.0`.
+- [x] `tests/lifecycle.test.ts` — `new → edit → commit → link → rm → restore` on one
+      record, run against both a temp `LocalAdapter` file and `MemoryAdapter`
+      (`describe.each`, one spec body). Checks state each step leaves behind that the
+      next one depends on (edited content survives the round trip; the link and the
+      soft-delete both survive `restore`), not just each command in isolation.
+- [x] `tests/server-integration.test.ts` — a real, listening `@haverstack/server`
+      (`startTestServer()` from its new `/testing` export, added upstream for exactly
+      this — see below), not a mocked fetch. The owner side is `server.ctx.stack`
+      directly (the same unscoped, full-trust `Stack` the server process holds — a
+      stand-in for an operator with direct access, since the test server's fixed entity
+      id has no real keypair a DID handshake could authenticate as, and this CLI's
+      server auth is DID challenge-response only, never a shared token). The grantee
+      side is the real thing: a generated `did:key`, a saved profile, and `openStack()`
+      performing the actual handshake against the live server. Covers: a grantee
+      correctly reported as `mode: 'grantee'`; a mutate refused with only `read-any`
+      granted (verified the record was untouched, not just that the call failed);
+      `includeUnlisted` refused over the wire with core's own message; a stale
+      `ifVersion` reported as a conflict. **Discovery**: `Stack.mutate()` (the plain,
+      client-side class every backend shares) diffs the change set against the current
+      record _before_ deciding whether to write, and returns early with no adapter call
+      at all when nothing actually moved — so a permission-refusal test whose patch
+      happens to match what's already stored never reaches the server to be refused.
+      Not a bug: skipping a real no-op write is correct client-side behavior; the fix
+      was making the test's edit a genuine content change, the same way a real edit
+      would be.
+- [x] **`@haverstack/server` gained a library surface** (was Docker-image-only, no
+      `exports`, unpublishable) to make the test above possible: `src/main.ts` is now
+      the process entrypoint, `src/index.ts` a pure library barrel (`createApp`,
+      `initStack`/`StackContext`, `loadConfig`/`Config`, `createShutdownHandler`), and
+      `@haverstack/server/testing` (mirrors `@haverstack/core/testing`) exports
+      `startTestServer()` plus the fixtures its own route tests already used. Published
+      as `@haverstack/server@0.9.0` (`haverstack/server#124`, `34f276e`). One follow-up
+      fix landed directly on `main` after: npm's provenance check rejected the first
+      publish attempt over a missing `package.json` `repository` field
+      (`registry.npmjs.org` error, not a CI failure) — added and republished
+      successfully as the same `0.9.0`. Both repos' `ci.yml` also gained a
+      workflow-level `permissions: contents: read`, prompted by a CodeQL finding on
+      `server`'s PR — none of either repo's CI jobs push or comment, so the default
+      broader `GITHUB_TOKEN` was more than any of them need.
+- [x] `README.md` rewritten: install, `hstack stack add` for both backends, the
+      new/edit/commit loop and its non-destructive-until-commit guarantee, everyday
+      commands (`ls`/`show`/`rm`/`tag`/`link`/`perm`/`grant`/`attach`/`types define`),
+      and two `--json`/`jq` recipes. Dropped the "Phase 0, early" status line — the
+      command surface it now documents is the real one.
+- [x] `scripts/smoke.mjs` (`pnpm run smoke`, wired into `ci.yml` as a `smoke` job after
+      `build`): spawns the actual built `dist/cli.js` as a subprocess, not the exported
+      functions `tests/` calls in-process, against a self-seeded temp stack — the
+      binary's shebang, packaging, and argv parsing are the thing this catches that the
+      test suite can't. `-c` plus a two-line scripted `$EDITOR` stub makes the
+      new-record path non-interactive. Self-contained: doesn't touch `cli-example`,
+      which has no CI of its own (no remote — see Phase 0). All five checks plus
+      `smoke` green.
+- [x] First changeset (`.changeset/initial-release.md`, `minor` — `0.0.0` → `0.1.0` on
+      next release) describing the whole surface as shipped, not phase-by-phase.
 
 ---
 
