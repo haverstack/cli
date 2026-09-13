@@ -97,7 +97,7 @@ async function afterStart(
   }
 
   if (editor) launchEditor(editor, started.file, false);
-  if (config.explorer && opts.explorer !== false) launchExplorer(started.dir);
+  if (config.explorer || opts.explorer) launchExplorer(started.dir);
   out(
     editor
       ? `Editing ${started.recordId}. Run \`hstack commit\` when done.\n  ${started.file}`
@@ -252,7 +252,7 @@ program
   .option('--body <field>', 'which text field is the body')
   .option('--minimal', 'scaffold required fields only')
   .option('-c, --commit', 'wait for the editor, then commit')
-  .option('--no-explorer', 'do not open a file manager')
+  .option('--explorer', 'also open a file manager on the working directory')
   .action(async function (
     this: Command,
     typeId: string,
@@ -283,7 +283,7 @@ program
   .command('edit <id>')
   .description('Open an existing record in your editor')
   .option('-c, --commit', 'wait for the editor, then commit')
-  .option('--no-explorer', 'do not open a file manager')
+  .option('--explorer', 'also open a file manager on the working directory')
   .action(async function (
     this: Command,
     id: string,

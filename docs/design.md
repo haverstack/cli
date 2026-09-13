@@ -202,11 +202,14 @@ a layout bug.
 | `hstack discard [<id>]`                           | Delete the working dir and lock. Never touches the stack. `--stale` sweeps every stale edit.                                                                                                                                                                                |
 
 `hstack new` / `hstack edit` return once the working directory exists and hand the editor
-launch to the CLI: by default the editor (and, if `explorer` is set, a file manager on the
-working dir) is spawned **detached** and the process exits, releasing any lock on a local
-file. `-c` / `--commit` instead waits for the editor to exit and then commits — the
-one-shot `git commit` feel, for a terminal editor. The editor is `config.editor`, else
-`$VISUAL`, else `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
+launch to the CLI: by default the editor is spawned **detached** and the process exits,
+releasing any lock on a local file. A file manager on the working dir opens alongside it
+when `explorer = true` is set in `config.toml` (a standing preference) or `--explorer` is
+passed for just this call (e.g. to drop an attachment before committing) — off by
+default either way, since a detached GUI file manager makes no sense over SSH. `-c` /
+`--commit` instead waits for the editor to exit and then commits — the one-shot `git
+commit` feel, for a terminal editor. The editor is `config.editor`, else `$VISUAL`, else
+`$EDITOR`; with none set, `new`/`edit` just print the file path to open.
 
 **`parentId` moves with the record.** Core's `mutate()` carries a content patch and a
 `parentId` in one fenced, one-version write, so editing the `parentId` line and
