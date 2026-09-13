@@ -19,7 +19,7 @@ import {
 } from '../record/format.js';
 import { scaffoldRecord } from '../record/scaffold.js';
 import { parseRecord, RecordParseError } from '../record/parse.js';
-import { downloadEmbeds, reconcileAttachments } from '../edit/attachments.js';
+import { attachmentFilenames, downloadEmbeds, reconcileAttachments } from '../edit/attachments.js';
 import { iso } from '../util.js';
 import {
   acquireEdit,
@@ -79,10 +79,11 @@ export async function editRecord(
   }
   const type = await stack.getType(record.typeId);
   const bodyField = bodyFieldOf(type);
-  const text = renderRecord(record, type);
+  const filenames = await attachmentFilenames(stack, record.associations);
+  const text = renderRecord(record, type, { attachmentFilenames: filenames });
   const data = lock(recordId, record.typeId, 'edit', bodyField, stackLabel);
   data.baseVersion = record.version;
-  data.readonly = readonlyBlock(record);
+  data.readonly = readonlyBlock(record, filenames);
 
   const dir = await acquireEdit(stackLabel, data, text);
   const warnings = await downloadEmbeds(stack, recordId, dir);

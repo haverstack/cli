@@ -416,6 +416,16 @@ file dropped into a not-yet-committed working directory is embedded on the recor
 write. A read or write failure on one file is a warning appended to the commit message,
 never a blocked commit — the same posture `downloadEmbeds` already took.
 
+The association also records `attachmentRecordId` — the specific `_attachment` record
+`putAttachment()` just created — so a display name (in `_readonly`, and the filename
+`downloadEmbeds` writes into the working dir) resolves through core's
+`resolveReferencedAttachment()` rather than always picking the fileId's globally-earliest
+upload. This matters because content is deduplicated but metadata isn't: two records can
+reference byte-identical content uploaded under different filenames, and without this
+each would show the other's name. Best-effort like everything else here — a stale or
+missing pointer just falls back to the same resolution `resolveReferencedAttachment()`
+already does with none.
+
 ### Reference-creation gating
 
 Core gates reference creation on read access to the target: a `relationship` to a record

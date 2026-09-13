@@ -7,7 +7,7 @@
  * See docs/design.md § Schema-driven front matter.
  */
 
-import type { FieldDef, StackRecord, StackType, TypeSchema } from '@haverstack/core';
+import type { Association, FieldDef, StackRecord, StackType, TypeSchema } from '@haverstack/core';
 import { iso, oneLine } from '../util.js';
 import { stringify } from 'yaml';
 
@@ -37,6 +37,9 @@ export function bodyFieldOf(type: StackType | null | undefined): string | null {
 export type RenderOptions = {
   /** Also list optional fields the record does not set, commented out. */
   all?: boolean;
+  /** Attachment association -> its resolved filename, for `_readonly`
+   * display. See `attachmentFilenames()` in edit/attachments.ts. */
+  attachmentFilenames?: Map<Association, string>;
 };
 
 export function renderRecord(
@@ -63,7 +66,7 @@ export function renderRecord(
     front[key] = record.content[key];
   }
 
-  front._readonly = readonlyBlock(record);
+  front._readonly = readonlyBlock(record, opts.attachmentFilenames);
 
   let yaml = stringify(front, { lineWidth: 0 }).trimEnd();
   // A root record shows no live parentId to edit — splice a commented hint
@@ -99,9 +102,15 @@ function unsetFieldLines(record: StackRecord, type: StackType, body: string | nu
 
 /**
  * The `_readonly` mapping as `renderRecord` writes it. `hstack edit` keeps
- * this as the baseline the parse-time diff-guard compares against.
+ * this as the baseline the parse-time diff-guard compares against — pass
+ * the exact same `attachmentFilenames` map to both call sites, or the
+ * two renders won't match and every edit with an attachment will look
+ * hand-tampered.
  */
-export function readonlyBlock(record: StackRecord): Record<string, unknown> {
+export function readonlyBlock(
+  record: StackRecord,
+  attachmentFilenames?: Map<Association, string>,
+): Record<string, unknown> {
   const ro: Record<string, unknown> = {
     version: record.version,
     createdAt: iso(record.createdAt),
@@ -112,7 +121,21 @@ export function readonlyBlock(record: StackRecord): Record<string, unknown> {
   if (record.deletedAt) ro.deletedAt = iso(record.deletedAt);
   if (record.unlistedAt) ro.unlistedAt = iso(record.unlistedAt);
 
-  const relatedAndFiles = (record.associations ?? []).filter((a) => a.kind !== 'tag');
+  const relatedAndFiles = (record.associations ?? [])
+    .filter((a) => a.kind !== 'tag')
+    .map((a) => {
+      if (a.kind !== 'attachment') return a;
+      const filename = attachmentFilenames?.get(a);
+      return filename
+        ? {
+            kind: a.kind,
+            label: a.label,
+            filename,
+            fileId: a.fileId,
+            ...(a.attachmentRecordId && { attachmentRecordId: a.attachmentRecordId }),
+          }
+        : a;
+    });
   if (relatedAndFiles.length > 0) ro.associations = relatedAndFiles;
   if (record.permissions && record.permissions.length > 0) ro.permissions = record.permissions;
   return ro;

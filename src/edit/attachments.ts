@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type { Association, Stack } from '@haverstack/core';
-import { inferContentTypeFromFilename } from '@haverstack/core/wire';
+import { inferContentTypeFromFilename, resolveReferencedAttachment } from '@haverstack/core/wire';
 import { RESERVED_WORKING_FILES } from './lock.js';
 
 const EMBED_LABEL = 'embed';
@@ -52,7 +52,7 @@ export async function downloadEmbeds(
   for (const assoc of embeds) {
     try {
       const bytes = await stack.getAttachment(assoc.fileId);
-      const name = uniqueName(await filenameFor(stack, assoc.fileId), used);
+      const name = uniqueName(await filenameFor(stack, assoc), used);
       await writeFile(join(dir, name), bytes);
     } catch (err) {
       warnings.push(
@@ -96,8 +96,13 @@ export async function reconcileAttachments(
     if (current.has(fileId)) continue; // unchanged — content-addressed skip
     try {
       const mimeType = inferContentTypeFromFilename(name) ?? 'application/octet-stream';
-      await stack.putAttachment(bytes, mimeType, name);
-      await stack.associate(recordId, { kind: 'attachment', label: EMBED_LABEL, fileId });
+      const uploaded = await stack.putAttachment(bytes, mimeType, name);
+      await stack.associate(recordId, {
+        kind: 'attachment',
+        label: EMBED_LABEL,
+        fileId,
+        attachmentRecordId: uploaded.id,
+      });
     } catch (err) {
       warnings.push(`could not attach "${name}": ${(err as Error).message}`);
     }
@@ -115,10 +120,48 @@ export async function reconcileAttachments(
   return warnings;
 }
 
-async function filenameFor(stack: Stack, fileId: string): Promise<string> {
-  const [earliest] = await stack.getAttachmentRecords(fileId);
-  const named = earliest?.content.filename;
-  return typeof named === 'string' && named.trim() ? named : `${fileId.slice(0, 12)}.bin`;
+async function filenameFor(
+  stack: Stack,
+  assoc: Extract<Association, { kind: 'attachment' }>,
+): Promise<string> {
+  const records = await stack.getAttachmentRecords(assoc.fileId);
+  const resolved = resolveReferencedAttachment(records, {
+    attachmentRecordId: assoc.attachmentRecordId,
+  });
+  const named = resolved?.content.filename;
+  return typeof named === 'string' && named.trim() ? named : `${assoc.fileId.slice(0, 12)}.bin`;
+}
+
+/**
+ * Filenames for every `kind: 'attachment'` association, for display only
+ * (e.g. in `_readonly`) — so a fileId isn't the only way to tell
+ * attachments apart. Resolves each one through its own
+ * `attachmentRecordId` when the association has one (the specific upload
+ * *this* reference came from), falling back the same way `filenameFor`
+ * does. Best-effort — a lookup failure just omits that entry.
+ */
+export async function attachmentFilenames(
+  stack: Stack,
+  associations: Association[] | undefined,
+): Promise<Map<Association, string>> {
+  const attachments = (associations ?? []).filter(
+    (a): a is Extract<Association, { kind: 'attachment' }> => a.kind === 'attachment',
+  );
+  const entries = await Promise.all(
+    attachments.map(async (a): Promise<[Association, string] | undefined> => {
+      try {
+        const records = await stack.getAttachmentRecords(a.fileId);
+        const resolved = resolveReferencedAttachment(records, {
+          attachmentRecordId: a.attachmentRecordId,
+        });
+        const named = resolved?.content.filename;
+        return typeof named === 'string' && named.trim() ? [a, named] : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return new Map(entries.filter((e): e is [Association, string] => e !== undefined));
 }
 
 function uniqueName(name: string, used: Set<string>): string {

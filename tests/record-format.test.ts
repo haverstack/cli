@@ -102,6 +102,22 @@ describe('renderRecord', () => {
     expect(ro.deletedAt).toBe('2026-03-01T00:00:00.000Z');
   });
 
+  it('shows a resolved filename on an attachment association, keyed by the association itself', () => {
+    const embed = { kind: 'attachment' as const, label: 'embed', fileId: 'f'.repeat(64) };
+    const record: StackRecord = { ...baseRecord, associations: [embed] };
+
+    const withoutMap = frontMatter(renderRecord(record, noteType))._readonly as Record<
+      string,
+      unknown
+    >;
+    expect(withoutMap.associations).toEqual([embed]);
+
+    const filenames = new Map([[embed, 'photo.png']]);
+    const withMap = frontMatter(renderRecord(record, noteType, { attachmentFilenames: filenames }))
+      ._readonly as Record<string, unknown>;
+    expect(withMap.associations).toEqual([{ ...embed, filename: 'photo.png' }]);
+  });
+
   it('renders front matter only when the type has no body field', () => {
     const bare: StackType = { ...noteType, schema: { title: { kind: 'string' } } };
     const record = { ...baseRecord, content: { title: 'Just a title' } };

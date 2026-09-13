@@ -10,6 +10,7 @@
 import type { RecordFilter, Stack, StackRecord, RecordVersion } from '@haverstack/core';
 import { queryAll } from '../paginate.js';
 import { renderRecord, summarize } from '../record/format.js';
+import { attachmentFilenames } from '../edit/attachments.js';
 import { shortDid } from '../config.js';
 import { iso } from '../util.js';
 
@@ -68,7 +69,8 @@ export async function showRecord(stack: Stack, id: string, opts: ShowOptions): P
     return JSON.stringify(payload, null, 2);
   }
 
-  let text = renderRecord(record, type);
+  const filenames = await attachmentFilenames(stack, record.associations);
+  let text = renderRecord(record, type, { attachmentFilenames: filenames });
   if (opts.history) {
     text += `\nVersions\n${formatVersions(record, await stack.getVersions(id))}`;
   }

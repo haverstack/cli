@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Stack } from '@haverstack/core';
 import { MemoryAdapter } from '@haverstack/core/testing';
-import { downloadEmbeds, reconcileAttachments } from '../src/edit/attachments.js';
+import {
+  attachmentFilenames,
+  downloadEmbeds,
+  reconcileAttachments,
+} from '../src/edit/attachments.js';
 
 let stack: Stack;
 let id: string;
@@ -58,6 +62,40 @@ describe('downloadEmbeds', () => {
     await downloadEmbeds(stack, id, dir);
     expect((await readdir(dir)).sort()).toEqual(['a (2).txt', 'a.txt']);
   });
+
+  it("resolves a shared fileId's filename per-record via attachmentRecordId, not globally-earliest", async () => {
+    // Two records reference byte-identical content, each uploaded under its
+    // own filename — the exact scenario attachmentRecordId exists to fix.
+    const otherId = (await stack.create('com.example/note@1', { title: 'B' })).id;
+    const bytes = new TextEncoder().encode('identical bytes');
+
+    const first = await stack.putAttachment(bytes, 'text/plain', 'first.txt');
+    await stack.associate(id, {
+      kind: 'attachment',
+      label: 'embed',
+      fileId: first.content.fileId,
+      attachmentRecordId: first.id,
+    });
+
+    const second = await stack.putAttachment(bytes, 'text/plain', 'second.txt');
+    await stack.associate(otherId, {
+      kind: 'attachment',
+      label: 'embed',
+      fileId: second.content.fileId,
+      attachmentRecordId: second.id,
+    });
+    expect(first.content.fileId).toBe(second.content.fileId); // same content, same fileId
+
+    const otherDir = await mkdtemp(join(tmpdir(), 'hstack-attach-'));
+    try {
+      await downloadEmbeds(stack, id, dir);
+      await downloadEmbeds(stack, otherId, otherDir);
+      expect(await readdir(dir)).toEqual(['first.txt']);
+      expect(await readdir(otherDir)).toEqual(['second.txt']);
+    } finally {
+      await rm(otherDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('reconcileAttachments', () => {
@@ -72,6 +110,8 @@ describe('reconcileAttachments', () => {
     if (embeds[0].kind !== 'attachment') throw new Error('unreachable');
     const [meta] = await stack.getAttachmentRecords(embeds[0].fileId);
     expect(meta.content).toMatchObject({ mimeType: 'image/png', filename: 'photo.png' });
+    // Names *this* record's own upload, not just the shared fileId.
+    expect(embeds[0].attachmentRecordId).toBe(meta.id);
   });
 
   it('is a content-addressed no-op for a file already embedded, changed name aside', async () => {
@@ -107,5 +147,42 @@ describe('reconcileAttachments', () => {
     await mkdir(join(dir, 'a-directory'));
     const warnings = await reconcileAttachments(stack, id, dir);
     expect(warnings.some((w) => w.includes('a-directory'))).toBe(true);
+  });
+});
+
+describe('attachmentFilenames', () => {
+  it('resolves each association to its own upload, not the fileId-wide earliest', async () => {
+    const otherId = (await stack.create('com.example/note@1', { title: 'B' })).id;
+    const bytes = new TextEncoder().encode('identical bytes');
+
+    const first = await stack.putAttachment(bytes, 'text/plain', 'first.txt');
+    const firstAssoc = await stack.associate(id, {
+      kind: 'attachment',
+      label: 'embed',
+      fileId: first.content.fileId,
+      attachmentRecordId: first.id,
+    });
+    const second = await stack.putAttachment(bytes, 'text/plain', 'second.txt');
+    const secondAssoc = await stack.associate(otherId, {
+      kind: 'attachment',
+      label: 'embed',
+      fileId: second.content.fileId,
+      attachmentRecordId: second.id,
+    });
+
+    const names1 = await attachmentFilenames(stack, firstAssoc.associations);
+    const names2 = await attachmentFilenames(stack, secondAssoc.associations);
+    expect(names1.get(firstAssoc.associations![0])).toBe('first.txt');
+    expect(names2.get(secondAssoc.associations![0])).toBe('second.txt');
+  });
+
+  it('omits an entry it cannot resolve a filename for, rather than throwing', async () => {
+    const record = await stack.associate(id, {
+      kind: 'attachment',
+      label: 'embed',
+      fileId: 'f'.repeat(64), // no upload behind it
+    });
+    const names = await attachmentFilenames(stack, record.associations);
+    expect(names.size).toBe(0);
   });
 });
