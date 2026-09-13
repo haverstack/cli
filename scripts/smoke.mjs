@@ -5,9 +5,7 @@
  * Runs in CI after `pnpm run build` so a packaging or wiring mistake that
  * only shows up when `hstack` actually runs (a bad shebang, a missing
  * dist file, an argv-parsing slip) fails the build rather than shipping.
- * Self-contained: seeds its own temp stack, needs nothing from the
- * `cli-example` sandbox (which has no CI of its own — see docs/plan.md
- * Phase 8).
+ * Self-contained: seeds its own temp stack, no external fixtures needed.
  */
 
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';

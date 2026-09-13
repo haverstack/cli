@@ -7,8 +7,7 @@ It knows nothing about notes, articles, or sites. It fetches a type's schema, tu
 into an editable file, validates what comes back, and writes it. Every type in a stack is
 editable by the same tool on the day it is registered.
 
-See [`docs/design.md`](./docs/design.md) for the full design and [`docs/plan.md`](./docs/plan.md)
-for what's shipped so far.
+See [`docs/design.md`](./docs/design.md) for the full design.
 
 ## Install
 

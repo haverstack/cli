@@ -491,12 +491,11 @@ owning app.
 
 ---
 
-## Dogfooding sandbox
+## Testing approach
 
-`~/Dev/haverstack/cli-example/` (unpublished, local-only, mirroring
-`~/Dev/haverstack/eleventy-example/`) is where CLI features are exercised against a real
-stack: a seed script builds a local `.stack/stack.db` with a spread of commons types and
-an invented type or two, a profile points `hstack` at it, and the working-copy / lock /
-commit flow is driven by hand and by a smoke-test script. It consumes the CLI via
-`link:../cli` (build first — `dist` is gitignored). It is a sandbox, not a fixture: the
-package's own tests use `MemoryAdapter` and a temp `LocalAdapter` file.
+The package's own tests use `MemoryAdapter` for speed and a temp `LocalAdapter` file
+where adapter-specific behavior matters; `tests/server-integration.test.ts` runs the
+same commands against a real, listening `@haverstack/server` instance for the
+server-only paths (permission refusals, `includeUnlisted`, `ifVersion` conflicts).
+`scripts/smoke.mjs` spawns the actual built `dist/cli.js` binary end to end, so a
+packaging or argv-parsing mistake the in-process suite can't see still fails CI.

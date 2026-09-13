@@ -24,8 +24,6 @@ Report results honestly. If something fails, say so with the output.
 - [`docs/design.md`](./docs/design.md) — how the CLI works and why. A change to observable
   behavior updates the relevant section in the same change. Module comments cite it as
   `docs/design.md § Section`.
-- [`docs/plan.md`](./docs/plan.md) — the phased build plan. Tick items and add short
-  progress notes as work lands.
 
 ## Conventions
 

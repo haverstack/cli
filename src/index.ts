@@ -2,8 +2,8 @@
  * @haverstack/cli — programmatic entry.
  *
  * The package is primarily a binary (`haverstack` / `hstack`); these exports
- * exist so the dogfooding sandbox and tests can drive command internals
- * without spawning a process.
+ * exist so tests (and any script embedding the CLI) can drive command
+ * internals without spawning a process.
  */
 
 export { openStack, computeMode } from './openStack.js';
