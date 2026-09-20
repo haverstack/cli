@@ -134,9 +134,37 @@ describe('edit -> commit', () => {
         `type: com.example/note@1\nparentId: ${parent.id}`,
       ),
     );
+    const before = (await stack.get(id))!;
     const outcome = await commitEdit(stack, LABEL, id, {});
     expect(outcome.ok).toBe(true);
-    expect((await stack.get(id))?.parentId).toBe(parent.id);
+    const after = (await stack.get(id))!;
+    expect(after.parentId).toBe(parent.id);
+    // A move on its own is no-bump, so the commit reports the version the
+    // record was already at rather than inventing one.
+    expect(after.version).toBe(before.version);
+    expect(outcome.message).toContain(`v${before.version}`);
+  });
+
+  it('still fences a move under ifVersion when the same commit patches content', async () => {
+    await stack.defineType('com.example/folder@1', 'Folder', {
+      name: { kind: 'string', required: true },
+    });
+    const parent = await stack.create('com.example/folder@1', { name: 'p2' });
+    const started = await editRecord(stack, LABEL, id);
+    await writeEditFile(
+      started.dir,
+      (await readEditFile(started.dir))
+        .replace('type: com.example/note@1', `type: com.example/note@1\nparentId: ${parent.id}`)
+        .replace(/title: .*/, 'title: Moved and renamed'),
+    );
+    // Someone else writes while the edit is open — naming `contentPatch`
+    // alongside `parentId` is what keeps the precondition live.
+    await stack.mutate(id, { contentPatch: { title: 'Elsewhere' } });
+
+    const outcome = await commitEdit(stack, LABEL, id, {});
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toMatch(/Conflict:/);
+    expect((await stack.get(id))?.parentId).toBeUndefined();
   });
 
   it('surfaces a nonexistent parentId as a kept-copy failure, not a crash', async () => {
@@ -208,10 +236,10 @@ describe('working-directory attachments', () => {
     expect(outcome.ok).toBe(true);
     const record = await stack.get(started.recordId);
     expect(record?.associations).toHaveLength(1);
-    // create() lands at v1; the embed associate is a second write the
-    // reported version must reflect, not create()'s own v1.
-    expect(outcome.message).toContain(`v${record?.version}`);
-    expect(record?.version).toBeGreaterThan(1);
+    // The embed associate is a no-bump write, so the record stays at
+    // create()'s v1 and that is what the commit reports.
+    expect(record?.version).toBe(1);
+    expect(outcome.message).toContain('v1');
   });
 
   it('a file dropped during a later edit is embedded, and removing it dissociates', async () => {

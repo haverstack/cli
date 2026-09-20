@@ -22,15 +22,26 @@ beforeEach(async () => {
 });
 
 describe('tagAdd / tagRemove', () => {
-  it('adds and removes a tag, reporting the resulting version', async () => {
+  it('adds and removes a tag without moving the version', async () => {
+    const before = (await stack.get(id))!;
     const added = await tagAdd(stack, id, 'starred');
-    expect(added).toBe(`${id} is tagged "starred" (v2).`);
+    expect(added).toBe(`${id} is tagged "starred".`);
     const record = await stack.get(id);
     expect(record?.associations).toEqual([{ kind: 'tag', label: 'starred' }]);
+    // Associating is a no-bump write: version and updatedAt stay put.
+    expect(record?.version).toBe(before.version);
+    expect(record?.updatedAt.getTime()).toBe(before.updatedAt.getTime());
 
     const removed = await tagRemove(stack, id, 'starred');
-    expect(removed).toBe(`${id} is no longer tagged "starred" (v3).`);
+    expect(removed).toBe(`${id} is no longer tagged "starred".`);
     expect((await stack.get(id))?.associations ?? []).toEqual([]);
+  });
+
+  it('reports a repeat as the no-op it is', async () => {
+    await tagAdd(stack, id, 'starred');
+    expect(await tagAdd(stack, id, 'starred')).toMatch(/already tagged/);
+    await tagRemove(stack, id, 'starred');
+    expect(await tagRemove(stack, id, 'starred')).toMatch(/nothing to remove/);
   });
 
   it('errors on a missing record', async () => {
@@ -73,13 +84,16 @@ describe('buildRelationshipTarget', () => {
 describe('linkAdd / linkRemove', () => {
   it('associates and dissociates a relationship to another record', async () => {
     const msg = await linkAdd(stack, id, 'see-also', { toRecord: otherId });
-    expect(msg).toBe(`${id} --see-also--> ${otherId} (v2).`);
+    expect(msg).toBe(`${id} --see-also--> ${otherId}.`);
     expect((await stack.get(id))?.associations).toEqual([
       { kind: 'relationship', label: 'see-also', target: { scope: 'record', recordId: otherId } },
     ]);
 
     await linkRemove(stack, id, 'see-also', { toRecord: otherId });
     expect((await stack.get(id))?.associations ?? []).toEqual([]);
+    expect(await linkRemove(stack, id, 'see-also', { toRecord: otherId })).toMatch(
+      /nothing to remove/,
+    );
   });
 
   it('dissociate only removes the exact target named', async () => {

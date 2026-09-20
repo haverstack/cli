@@ -77,6 +77,20 @@ async function main() {
     '`tag add` associated the tag',
   );
 
+  run('perm', 'add', id, '--anyone');
+  const shared = JSON.parse(run('show', id, '--json'));
+  check(
+    (shared.permissions ?? []).some((p) => p.kind === 'anyone' && p.label === 'read'),
+    '`perm add --anyone` wrote an `anyone` element',
+  );
+  check(shared.version === tagged.version, 'tagging and sharing are no-bump writes');
+  check(run('perm', 'ls', id).includes('anyone'), '`perm ls` shows who reaches it');
+  run('perm', 'rm', id, '--anyone');
+  check(
+    (JSON.parse(run('show', id, '--json')).permissions ?? []).length === 0,
+    '`perm rm --anyone` withdrew it',
+  );
+
   run('rm', id);
   const afterRm = JSON.parse(run('ls', TYPE_ID, '--json'));
   check(afterRm.length === 0, '`rm` excludes the record from a default listing');

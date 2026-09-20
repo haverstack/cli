@@ -149,20 +149,21 @@ export async function commitEdit(
 
   try {
     if (data.mode === 'new') {
-      let record = await stack.create(data.typeId, parsed.content, {
+      const record = await stack.create(data.typeId, parsed.content, {
         id: parsed.id ?? data.recordId,
         parentId: parsed.parentId ?? undefined,
       });
-      // Tag and attachment associates each bump the version, so the report
-      // below needs whatever the record actually ended on, not create()'s.
-      for (const label of parsed.tags)
-        record = await stack.associate(record.id, { kind: 'tag', label });
+      // Tags and attachments are no-bump writes, so create()'s version is
+      // the one the record ends on — nothing to re-read for.
+      for (const label of parsed.tags) await stack.associate(record.id, { kind: 'tag', label });
       const warnings = await reconcileAttachments(stack, record.id, dir);
-      const final = (await stack.get(record.id)) ?? record;
       await releaseEdit(dir);
       return {
         ok: true,
-        message: withWarnings(`Created ${final.id} (${data.typeId}), v${final.version}.`, warnings),
+        message: withWarnings(
+          `Created ${record.id} (${data.typeId}), v${record.version}.`,
+          warnings,
+        ),
       };
     }
 
@@ -170,23 +171,22 @@ export async function commitEdit(
     if (!record) return { ok: false, message: `Record "${data.recordId}" no longer exists.` };
 
     const patch = buildPatch(record.content, parsed.content);
-    // mutate() carries content and parentId in one fenced, one-version
-    // write; core checks the destination exists and refuses a cycle. Tag
-    // and attachment reconcile run after (associations are set-merged, not
-    // fenced), so a final re-read reports the version the record actually
-    // ended on.
-    await stack.mutate(
+    // One fenced write carrying both aspects: core checks the destination
+    // exists and refuses a cycle. A move is no-bump on its own, but naming
+    // `contentPatch` alongside it restores `ifVersion` over the whole call.
+    const written = await stack.mutate(
       data.recordId,
       { contentPatch: patch, parentId: parsed.parentId },
       { ifVersion: opts.force ? undefined : data.baseVersion },
     );
+    // Tags and attachments reconcile afterwards and bump nothing, so the
+    // version this write produced is the one the record ends on.
     await reconcileTags(stack, record, parsed.tags);
     const warnings = await reconcileAttachments(stack, data.recordId, dir);
     await releaseEdit(dir);
-    const final = await stack.get(data.recordId);
     return {
       ok: true,
-      message: withWarnings(`Committed ${data.recordId}, v${final?.version ?? '?'}.`, warnings),
+      message: withWarnings(`Committed ${data.recordId}, v${written.version}.`, warnings),
     };
   } catch (err) {
     // Match on the stable `code` rather than `instanceof`: a linked dev

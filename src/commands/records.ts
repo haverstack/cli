@@ -89,8 +89,18 @@ export async function removeRecord(stack: Stack, id: string, hard: boolean): Pro
   const record = await stack.get(id);
   if (!record) throw new Error(`No record "${id}".`);
   if (hard) {
-    await stack.delete(id, { hard: true });
-    return `Purged ${id}. This cannot be undone.`;
+    // A purge destroys the only rows naming the files the record
+    // referenced, so core reports them rather than deleting bytes on its
+    // own — GC can no longer see they were ever referenced.
+    const { referencedFileIds } = await stack.delete(id, { hard: true });
+    const purged = `Purged ${id}. This cannot be undone.`;
+    return referencedFileIds.length === 0
+      ? purged
+      : [
+          purged,
+          `It referenced ${referencedFileIds.length} file(s); their bytes are still stored:`,
+          ...referencedFileIds.map((f) => `  ${f}`),
+        ].join('\n');
   }
   if (record.deletedAt)
     return `${id} is already deleted. \`hstack restore ${id}\` to bring it back.`;

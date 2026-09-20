@@ -30,7 +30,14 @@ export {
   buildRelationshipTarget,
 } from './commands/associations.js';
 export type { LinkTargetOptions } from './commands/associations.js';
-export { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
+export {
+  permAdd,
+  permList,
+  permRemove,
+  grantAdd,
+  grantRemove,
+  grantList,
+} from './commands/access.js';
 export type { PermTargetOptions, GrantTargetOptions } from './commands/access.js';
 export { attachAdd, attachRemove } from './commands/attach.js';
 

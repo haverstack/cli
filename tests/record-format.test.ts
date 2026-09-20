@@ -86,14 +86,14 @@ describe('renderRecord', () => {
         { kind: 'tag', label: 'work' },
         { kind: 'relationship', label: 'blocks', target: { scope: 'record', recordId: 'zzz' } },
       ],
-      permissions: [{ access: 'public' }],
+      permissions: [{ kind: 'anyone', label: 'read' }],
     };
     const fm = frontMatter(renderRecord(record, noteType));
     expect(fm.tags).toEqual(['starred', 'work']);
     const ro = fm._readonly as Record<string, unknown>;
     expect(ro.version).toBe(3);
     expect(ro.associations).toHaveLength(1);
-    expect(ro.permissions).toEqual([{ access: 'public' }]);
+    expect(ro.permissions).toEqual([{ kind: 'anyone', label: 'read' }]);
   });
 
   it('marks a soft-deleted record in _readonly', () => {

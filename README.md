@@ -53,11 +53,18 @@ hstack show <id>                   # render one record
 hstack rm <id>                     # soft-delete; hstack restore <id> to undo
 hstack tag add <id> <label>        # tag a record outside an edit session
 hstack link add <id> --label <l> --to-record <otherId>
-hstack perm add <id> --entity <did> --read
-hstack grant add <typeId> --entity <did> read-any
+hstack perm add <id> --entity <did> --read --write   # or --anyone, or --group <id> --role member
+hstack perm ls <id>                # who reaches this record
+hstack grant add <typeId> --entity <did> read-any    # or --authenticated, or --group + --role
 hstack attach add <id> --label <l> --file <path>
 hstack types define <schema.json>  # register { id, name, schema, migratesFrom? }
 ```
+
+Tagging, linking, attaching, sharing and moving a record are **no-bump** writes in core:
+they leave `version` and `updatedAt` where they stand, so these commands report what the
+record now says rather than a version number that did not move. Record permissions are
+associations — one element per bit per grantee — so `perm add`/`perm rm` write exactly the
+element you name and never restate the rest of the ACL over someone else's change.
 
 Every read command takes `--json` and loops the result cursor to exhaustion (or an
 explicit `--limit`), so it's a client to build on, not just one to sit in front of:
