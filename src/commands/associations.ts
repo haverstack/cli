@@ -13,7 +13,7 @@
  */
 
 import type { Association, Stack, StackRecord } from '@haverstack/core';
-import { formatTarget, parseTarget, relationshipTargetOf } from '../target.js';
+import { parseLinkTarget, showLinkTarget } from '../target.js';
 
 async function requireRecord(stack: Stack, id: string): Promise<StackRecord> {
   const record = await stack.get(id);
@@ -51,11 +51,10 @@ export async function linkAdd(
   label: string,
   to: string,
 ): Promise<string> {
-  const parsed = parseTarget(to);
+  const target = parseLinkTarget(to);
   const before = await requireRecord(stack, id);
-  const target = relationshipTargetOf(parsed);
   const after = await stack.associate(id, { kind: 'relationship', label, target });
-  const arrow = `${id} --${label}--> ${formatTarget(parsed)}`;
+  const arrow = `${id} --${label}--> ${showLinkTarget(target)}`;
   return count(after) === count(before) ? `${arrow} — already linked.` : `${arrow}.`;
 }
 
@@ -65,11 +64,10 @@ export async function linkRemove(
   label: string,
   to: string,
 ): Promise<string> {
-  const parsed = parseTarget(to);
+  const target = parseLinkTarget(to);
   const before = await requireRecord(stack, id);
-  const target = relationshipTargetOf(parsed);
   const after = await stack.dissociate(id, { kind: 'relationship', label, target });
-  const arrow = `${id} --${label}--> ${formatTarget(parsed)}`;
+  const arrow = `${id} --${label}--> ${showLinkTarget(target)}`;
   return count(after) === count(before)
     ? `No such link: ${arrow} — nothing to remove.`
     : `Removed ${arrow}.`;

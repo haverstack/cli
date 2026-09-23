@@ -23,17 +23,18 @@ export type { ListOptions, ShowOptions } from './commands/records.js';
 export { stackAdd, stackList, stackUse, stackRemove } from './commands/stack.js';
 
 export { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
+// Each entry point hands back one command's own narrow type — the wide
+// vocabulary is internal, so no caller can hold an un-narrowed target.
 export {
-  parseTarget,
-  formatTarget,
-  permissionTargetOf,
-  grantTargetOf,
-  grantQueryOf,
-  relationshipTargetOf,
-  targetOfPermission,
-  targetOfRelationship,
+  parsePermissionTarget,
+  parseGrantTarget,
+  parseGrantQuery,
+  parseLinkTarget,
+  showPermissionTarget,
+  showGrantTarget,
+  showLinkTarget,
 } from './target.js';
-export type { Target, TargetRole, PermissionTarget, GrantTarget, GrantQuery } from './target.js';
+export type { PermissionTarget, TargetRole } from './target.js';
 export {
   permAdd,
   permList,

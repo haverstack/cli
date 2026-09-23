@@ -3,19 +3,33 @@
  *
  * Core keeps three unions apart on purpose: a `RelationshipTarget` names
  * no role, a `PermissionGrantee` has no record scope, and `anyone` is a
- * kind of its own rather than a grantee. This vocabulary is deliberately
- * wider than any one of them and is narrowed per command, so a person
- * naming Alice writes the same thing wherever they are and `--pick` has
- * one seam to substitute into.
+ * kind of its own rather than a grantee. This grammar is deliberately
+ * wider than any one of them, so a person naming Alice writes the same
+ * thing wherever they are — and every entry point below hands back one
+ * command's own narrow type, so the wide form never reaches a write.
+ *
+ * Mixing the tiers is the mistake with real consequences, so a target
+ * from the wrong union is refused by name and told what to say instead.
+ * Nothing is ever converted: `anyone` reaches anonymous requesters and
+ * `authenticated` does not, and no message trades one for the other
+ * without saying which way it moves.
  * See docs/design.md § Naming a target.
  */
 
-import type { EntityId, RecordId, RelationshipTarget } from '@haverstack/core';
+import type {
+  EntityId,
+  GrantGrantee,
+  GrantQuery,
+  PermissionGrantee,
+  RecordId,
+  RelationshipTarget,
+} from '@haverstack/core';
 
 /** `any` is listing-only — `grant ls` widens on it; nothing writes it. */
 export type TargetRole = 'member' | 'admin' | 'any';
 
-export type Target =
+/** The whole vocabulary. Internal: every export below narrows it first. */
+type Target =
   | { kind: 'anyone' }
   | { kind: 'authenticated' }
   | { kind: 'entity'; entityId: EntityId }
@@ -23,23 +37,8 @@ export type Target =
   | { kind: 'record'; recordId: RecordId; stackUrl?: string }
   | { kind: 'external'; ns: string; id: string };
 
-/** What a permission names: `anyone` carries no grantee, the rest do. */
-export type PermissionTarget =
-  | { scope: 'anyone' }
-  | { scope: 'entity'; entityId: EntityId }
-  | { scope: 'group'; groupId: RecordId; role: 'member' | 'admin' };
-
-/** What `grant()`/`revoke()` write — one role, never the listing widening. */
-export type GrantTarget =
-  | { kind: 'entity'; entityId: EntityId }
-  | { kind: 'group'; groupId: RecordId; role: 'member' | 'admin' }
-  | { kind: 'authenticated' };
-
-/** What `listGrants()` accepts — the same union, widened by `role: 'any'`. */
-export type GrantQuery =
-  | { kind: 'entity'; entityId: EntityId }
-  | { kind: 'group'; groupId: RecordId; role: TargetRole }
-  | { kind: 'authenticated' };
+/** What `perm` names: `anyone` carries no grantee, so it is its own arm. */
+export type PermissionTarget = { scope: 'anyone' } | PermissionGrantee;
 
 const GRAMMAR =
   'anyone | authenticated | <did> | entity:<did> | group:<id>/<member|admin> | ' +
@@ -52,11 +51,12 @@ function reject(problem: string): never {
 /**
  * A `--to` value as its tagged form. Exactly one shape is inferred rather
  * than spelled — a leading `did:` is an entity — because a DID is the one
- * identifier common to every command and `entity:did:key:…` reads badly on
- * the most frequent call. Everything else names its scheme, so an unknown
- * one is an error rather than a guess.
+ * identifier every command takes and cannot be confused with a Record ID,
+ * which is twelve lowercase Crockford base-32 characters and holds no
+ * colon. Everything else names its scheme, so an unknown one is an error
+ * rather than a guess.
  */
-export function parseTarget(value: string): Target {
+function parseTarget(value: string): Target {
   const raw = value.trim();
   if (!raw) reject('A target cannot be empty.');
   if (raw === 'anyone') return { kind: 'anyone' };
@@ -122,7 +122,7 @@ function externalTarget(rest: string): Target {
 }
 
 /** The inverse of parseTarget — so a listing's output is a command's input. */
-export function formatTarget(target: Target): string {
+function formatTarget(target: Target): string {
   switch (target.kind) {
     case 'anyone':
       return 'anyone';
@@ -141,15 +141,28 @@ export function formatTarget(target: Target): string {
   }
 }
 
-// ------------------------------------------------- narrowing, per command
+// ------------------------------------------------------------- refusals
 
-function wrongArm(target: Target, verb: string, accepts: string): never {
+/** What to say instead, per arm a command cannot take. */
+type Hints = Partial<Record<Target['kind'], string>>;
+
+function refuse(target: Target, verb: string, accepts: string, hints: Hints): never {
+  const hint = hints[target.kind];
   throw new Error(
-    `${formatTarget(target)} is not something \`${verb}\` can name.\n  ${verb} accepts: ${accepts}`,
+    `${formatTarget(target)} is not something \`${verb}\` can name.` +
+      (hint ? `\n  ${hint}` : '') +
+      `\n  ${verb} accepts: ${accepts}`,
   );
 }
 
-export function permissionTargetOf(target: Target): PermissionTarget {
+const PERM_ACCEPTS = 'anyone | <did> | group:<id>/<member|admin>';
+const GRANT_ACCEPTS = 'authenticated | <did> | group:<id>/<member|admin>';
+const LINK_ACCEPTS = '<did> | record:<id>[@<stackUrl>] | external:<ns>/<id>';
+
+// ------------------------------------------------- one narrow type each
+
+export function parsePermissionTarget(value: string): PermissionTarget {
+  const target = parseTarget(value);
   switch (target.kind) {
     case 'anyone':
       return { scope: 'anyone' };
@@ -161,20 +174,30 @@ export function permissionTargetOf(target: Target): PermissionTarget {
       }
       return { scope: 'group', groupId: target.groupId, role: target.role };
     default:
-      wrongArm(target, 'perm', 'anyone | <did> | group:<id>/<member|admin>');
+      refuse(target, 'perm', PERM_ACCEPTS, {
+        // Deliberately not a substitution: `anyone` is the wider tier, and
+        // offering it as a synonym would be a quiet escalation.
+        authenticated:
+          'A record permission has no authenticated tier. `anyone` is the nearest, and it is ' +
+          'wider — it reaches anonymous requesters too, not only DID holders.',
+        record: `To share with a group, name it as a group: group:${target.kind === 'record' ? target.recordId : '<id>'}/<member|admin>.`,
+        external:
+          'A permission names who reaches the record, and something outside the stack holds no DID.',
+      });
   }
 }
 
-export function grantTargetOf(target: Target): GrantTarget {
-  const query = grantQueryOf(target);
+export function parseGrantTarget(value: string): GrantGrantee {
+  const query = parseGrantQuery(value);
   if (query.kind === 'group' && query.role === 'any') {
     throw new Error('`any` is for `grant ls` — a grant names member or admin.');
   }
-  return query as GrantTarget;
+  return query as GrantGrantee;
 }
 
 /** The listing form, which admits the role `grant`/`revoke` refuse. */
-export function grantQueryOf(target: Target): GrantQuery {
+export function parseGrantQuery(value: string): GrantQuery {
+  const target = parseTarget(value);
   switch (target.kind) {
     case 'authenticated':
       return { kind: 'authenticated' };
@@ -183,11 +206,18 @@ export function grantQueryOf(target: Target): GrantQuery {
     case 'group':
       return { kind: 'group', groupId: target.groupId, role: target.role };
     default:
-      wrongArm(target, 'grant', 'authenticated | <did> | group:<id>/<member|admin>');
+      refuse(target, 'grant', GRANT_ACCEPTS, {
+        anyone:
+          'A grant cannot reach anonymous requesters — did you mean `authenticated`, which ' +
+          'reaches any entity holding a DID?',
+        record: `To grant a group, name it as a group: group:${target.kind === 'record' ? target.recordId : '<id>'}/<member|admin>.`,
+        external: 'A grant names who may act, and something outside the stack holds no DID.',
+      });
   }
 }
 
-export function relationshipTargetOf(target: Target): RelationshipTarget {
+export function parseLinkTarget(value: string): RelationshipTarget {
+  const target = parseTarget(value);
   switch (target.kind) {
     case 'record':
       return {
@@ -200,26 +230,43 @@ export function relationshipTargetOf(target: Target): RelationshipTarget {
     case 'external':
       return { scope: 'external', ns: target.ns, id: target.id };
     default:
-      wrongArm(target, 'link', '<did> | record:<id>[@<stackUrl>] | external:<ns>/<id>');
+      refuse(target, 'link', LINK_ACCEPTS, {
+        // A Group *is* a Record, so the redirect is exact rather than advisory.
+        group: `To link to the group's record, use record:${target.kind === 'group' ? target.groupId : '<id>'}.`,
+        anyone: '`anyone` names who may read a record, not something a record can point at.',
+        authenticated:
+          '`authenticated` names who may act on a type, not something a record can point at.',
+      });
   }
 }
 
-// ------------------------------------------------- back from core's shapes
+// --------------------------------------------- rendering a narrow target
 
-export function targetOfRelationship(target: RelationshipTarget): Target {
+export function showPermissionTarget(target: PermissionTarget): string {
+  if (target.scope === 'anyone') return formatTarget({ kind: 'anyone' });
+  if (target.scope === 'entity') {
+    return formatTarget({ kind: 'entity', entityId: target.entityId });
+  }
+  return formatTarget({ kind: 'group', groupId: target.groupId, role: target.role });
+}
+
+export function showGrantTarget(target: GrantQuery): string {
+  if (target.kind === 'group') {
+    return formatTarget({ kind: 'group', groupId: target.groupId, role: target.role });
+  }
+  return formatTarget(target.kind === 'entity' ? target : { kind: 'authenticated' });
+}
+
+export function showLinkTarget(target: RelationshipTarget): string {
   if (target.scope === 'record') {
-    return {
+    return formatTarget({
       kind: 'record',
       recordId: target.recordId,
       ...(target.stackUrl && { stackUrl: target.stackUrl }),
-    };
+    });
   }
-  if (target.scope === 'entity') return { kind: 'entity', entityId: target.entityId };
-  return { kind: 'external', ns: target.ns, id: target.id };
-}
-
-export function targetOfPermission(grantee: PermissionTarget): Target {
-  if (grantee.scope === 'anyone') return { kind: 'anyone' };
-  if (grantee.scope === 'entity') return { kind: 'entity', entityId: grantee.entityId };
-  return { kind: 'group', groupId: grantee.groupId, role: grantee.role };
+  if (target.scope === 'entity') {
+    return formatTarget({ kind: 'entity', entityId: target.entityId });
+  }
+  return formatTarget({ kind: 'external', ns: target.ns, id: target.id });
 }

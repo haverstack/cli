@@ -11,17 +11,14 @@
  */
 
 import type { AuthorityAssociation, GrantAction, Stack, StackRecord } from '@haverstack/core';
+import type { GrantQuery } from '@haverstack/core';
 import {
-  formatTarget,
-  grantQueryOf,
-  grantTargetOf,
-  parseTarget,
-  permissionTargetOf,
-  targetOfPermission,
-  type GrantQuery,
-  type GrantTarget,
+  parseGrantQuery,
+  parseGrantTarget,
+  parsePermissionTarget,
+  showGrantTarget,
+  showPermissionTarget,
   type PermissionTarget,
-  type Target,
 } from '../target.js';
 
 // ---------------------------------------------------------------- perm
@@ -75,8 +72,7 @@ export async function permAdd(
   read: boolean,
   write: boolean,
 ): Promise<string> {
-  const parsed = parseTarget(to);
-  const target = permissionTargetOf(parsed);
+  const target = parsePermissionTarget(to);
   if (target.scope === 'anyone' && write) {
     throw new Error('`anyone` carries read only. Name a DID or a group to grant write.');
   }
@@ -93,7 +89,7 @@ export async function permAdd(
   if (write) record = await stack.grantAccess(id, elementFor(target, 'write')!);
 
   const after = bitsOf(record!.permissions, target);
-  const who = formatTarget(parsed);
+  const who = showPermissionTarget(target);
   return before.read === after.read && before.write === after.write
     ? `${id}: ${who} could already ${describeBits(after)} — nothing to do.`
     : `${id}: ${who} can now ${describeBits(after)}.`;
@@ -106,8 +102,7 @@ export async function permRemove(
   read: boolean,
   write: boolean,
 ): Promise<string> {
-  const parsed = parseTarget(to);
-  const target = permissionTargetOf(parsed);
+  const target = parsePermissionTarget(to);
   // Naming no bit withdraws the target's access entirely.
   if (!read && !write) {
     read = true;
@@ -125,7 +120,7 @@ export async function permRemove(
   if (read) record = await stack.revokeAccess(id, elementFor(target, 'read')!);
 
   const after = bitsOf(record!.permissions, target);
-  const who = formatTarget(parsed);
+  const who = showPermissionTarget(target);
   if (before.read === after.read && before.write === after.write) {
     return `${id}: ${who} had no ${describeBits({ read, write })} to remove — nothing to do.`;
   }
@@ -148,7 +143,7 @@ export async function permList(stack: Stack, id: string, json: boolean): Promise
 
   const byTarget = new Map<string, Bits>();
   for (const p of permissions) {
-    const who = formatTarget(targetOfPermission(granteeOf(p)));
+    const who = showPermissionTarget(granteeOf(p));
     const bits = byTarget.get(who) ?? { read: false, write: false };
     bits[p.label] = true;
     byTarget.set(who, bits);
@@ -163,18 +158,9 @@ export async function permList(stack: Stack, id: string, json: boolean): Promise
 
 // ---------------------------------------------------------------- grant
 
-const grantTargetFrom = (to: string): GrantTarget => grantTargetOf(parseTarget(to));
-
 /** A stored grant's grantee as a `--to` string, for a listing's output. */
-function describeGrantee(grantee: GrantQuery | undefined): string {
-  if (!grantee) return '—';
-  if (grantee.kind === 'entity')
-    return formatTarget({ kind: 'entity', entityId: grantee.entityId });
-  if (grantee.kind === 'group') {
-    return formatTarget({ kind: 'group', groupId: grantee.groupId, role: grantee.role });
-  }
-  return 'authenticated';
-}
+const describeGrantee = (grantee: GrantQuery | undefined): string =>
+  grantee ? showGrantTarget(grantee) : '—';
 
 export async function grantAdd(
   stack: Stack,
@@ -182,7 +168,7 @@ export async function grantAdd(
   to: string,
   actions: GrantAction[],
 ): Promise<string> {
-  const target = grantTargetFrom(to);
+  const target = parseGrantTarget(to);
   await stack.grant(target, [{ typeId, actions }]);
   return `Granted ${describeGrantee(target)} [${actions.join(', ')}] on ${typeId}.`;
 }
@@ -193,7 +179,7 @@ export async function grantRemove(
   to: string,
   actions: GrantAction[],
 ): Promise<string> {
-  const target = grantTargetFrom(to);
+  const target = parseGrantTarget(to);
   const withdrawn = await stack.revoke(target, [{ typeId, actions }]);
   const what = `${describeGrantee(target)} [${actions.join(', ')}] on ${typeId}`;
   return withdrawn.length === 0
@@ -202,7 +188,7 @@ export async function grantRemove(
 }
 
 export async function grantList(stack: Stack, typeId?: string, to?: string): Promise<string> {
-  const query = to === undefined ? undefined : grantQueryOf(parseTarget(to));
+  const query = to === undefined ? undefined : parseGrantQuery(to);
   const all = await stack.listGrants(query);
   const rows = (
     typeId ? all.filter((r) => (r.content as { typeId: string }).typeId === typeId) : all
@@ -218,5 +204,3 @@ export async function grantList(stack: Stack, typeId?: string, to?: string): Pro
   );
   return [`${'TYPE'.padEnd(typeW)}  ${'TARGET'.padEnd(targetW)}  ACTIONS`, ...lines].join('\n');
 }
-
-export type { Target };

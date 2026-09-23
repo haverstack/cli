@@ -1,123 +1,137 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatTarget,
-  grantQueryOf,
-  grantTargetOf,
-  parseTarget,
-  permissionTargetOf,
-  relationshipTargetOf,
+  parseGrantQuery,
+  parseGrantTarget,
+  parseLinkTarget,
+  parsePermissionTarget,
+  showGrantTarget,
+  showLinkTarget,
+  showPermissionTarget,
 } from '../src/target.js';
 
-describe('parseTarget', () => {
-  it('reads the two bare tiers', () => {
-    expect(parseTarget('anyone')).toEqual({ kind: 'anyone' });
-    expect(parseTarget('authenticated')).toEqual({ kind: 'authenticated' });
-  });
-
+describe('the shared grammar', () => {
   it('treats a bare DID as an entity — the one inferred shape', () => {
-    expect(parseTarget('did:key:z6MkAlice')).toEqual({
-      kind: 'entity',
+    expect(parsePermissionTarget('did:key:z6MkAlice')).toEqual({
+      scope: 'entity',
       entityId: 'did:key:z6MkAlice',
     });
-    expect(parseTarget('entity:did:key:z6MkAlice')).toEqual(parseTarget('did:key:z6MkAlice'));
-  });
-
-  it('reads a group with its role', () => {
-    expect(parseTarget('group:01hx/admin')).toEqual({
-      kind: 'group',
-      groupId: '01hx',
-      role: 'admin',
-    });
-    expect(parseTarget('group:01hx/any')).toEqual({ kind: 'group', groupId: '01hx', role: 'any' });
+    expect(parsePermissionTarget('entity:did:key:z6MkAlice')).toEqual(
+      parsePermissionTarget('did:key:z6MkAlice'),
+    );
   });
 
   it('reads a record, with and without another stack', () => {
-    expect(parseTarget('record:01hx')).toEqual({ kind: 'record', recordId: '01hx' });
-    expect(parseTarget('record:01hx@https://other.example')).toEqual({
-      kind: 'record',
+    expect(parseLinkTarget('record:01hx')).toEqual({ scope: 'record', recordId: '01hx' });
+    expect(parseLinkTarget('record:01hx@https://other.example')).toEqual({
+      scope: 'record',
       recordId: '01hx',
       stackUrl: 'https://other.example',
     });
   });
 
   it('splits an external target on its first slash, so the id may hold more', () => {
-    expect(parseTarget('external:atproto/at://did:plc:x/app.bsky.feed.post/3k')).toEqual({
-      kind: 'external',
+    expect(parseLinkTarget('external:atproto/at://did:plc:x/app.bsky.feed.post/3k')).toEqual({
+      scope: 'external',
       ns: 'atproto',
       id: 'at://did:plc:x/app.bsky.feed.post/3k',
     });
   });
 
   it('refuses a scheme it does not know rather than guessing an arm', () => {
-    expect(() => parseTarget('mystery:x')).toThrow(/not a target scheme/);
-    expect(() => parseTarget('01hx3k9m2p7q')).toThrow(/names no scheme/);
-    expect(() => parseTarget('  ')).toThrow(/cannot be empty/);
+    expect(() => parseLinkTarget('mystery:x')).toThrow(/not a target scheme/);
+    expect(() => parseLinkTarget('01hx3k9m2p7q')).toThrow(/names no scheme/);
+    expect(() => parsePermissionTarget('  ')).toThrow(/cannot be empty/);
   });
 
   it('names what is missing from a half-written target', () => {
-    expect(() => parseTarget('group:01hx')).toThrow(/names no role/);
-    expect(() => parseTarget('group:01hx/owner')).toThrow(/not a role/);
-    expect(() => parseTarget('group:/admin')).toThrow(/needs a record id/);
-    expect(() => parseTarget('external:atproto')).toThrow(/no identifier within it/);
-    expect(() => parseTarget('entity:')).toThrow(/needs a DID/);
-    expect(() => parseTarget('record:01hx@')).toThrow(/needs its URL/);
+    expect(() => parsePermissionTarget('group:01hx')).toThrow(/names no role/);
+    expect(() => parsePermissionTarget('group:01hx/owner')).toThrow(/not a role/);
+    expect(() => parsePermissionTarget('group:/admin')).toThrow(/needs a record id/);
+    expect(() => parseLinkTarget('external:atproto')).toThrow(/no identifier within it/);
+    expect(() => parsePermissionTarget('entity:')).toThrow(/needs a DID/);
+    expect(() => parseLinkTarget('record:01hx@')).toThrow(/needs its URL/);
   });
 
-  it('round-trips every arm through formatTarget', () => {
+  it('round-trips every arm back into the grammar that produced it', () => {
+    for (const s of ['anyone', 'did:key:z6MkAlice', 'group:01hx/member']) {
+      expect(showPermissionTarget(parsePermissionTarget(s))).toBe(s);
+    }
+    for (const s of ['authenticated', 'did:key:z6MkAlice', 'group:01hx/any']) {
+      expect(showGrantTarget(parseGrantQuery(s))).toBe(s);
+    }
     for (const s of [
-      'anyone',
-      'authenticated',
       'did:key:z6MkAlice',
-      'group:01hx/member',
       'record:01hx',
       'record:01hx@https://other.example',
       'external:atproto/at://x',
     ]) {
-      expect(formatTarget(parseTarget(s))).toBe(s);
+      expect(showLinkTarget(parseLinkTarget(s))).toBe(s);
     }
   });
 });
 
-describe('narrowing per command', () => {
-  it('gives perm the arms it accepts', () => {
-    expect(permissionTargetOf(parseTarget('anyone'))).toEqual({ scope: 'anyone' });
-    expect(permissionTargetOf(parseTarget('group:g/admin'))).toEqual({
+describe('each command takes only its own arms', () => {
+  it('gives perm what it accepts', () => {
+    expect(parsePermissionTarget('anyone')).toEqual({ scope: 'anyone' });
+    expect(parsePermissionTarget('group:g/admin')).toEqual({
       scope: 'group',
       groupId: 'g',
       role: 'admin',
     });
-    expect(() => permissionTargetOf(parseTarget('record:01hx'))).toThrow(
-      /not something `perm` can name/,
-    );
-    expect(() => permissionTargetOf(parseTarget('authenticated'))).toThrow(/`perm` can name/);
-    expect(() => permissionTargetOf(parseTarget('group:g/any'))).toThrow(/listing role/);
+    expect(() => parsePermissionTarget('group:g/any')).toThrow(/listing role/);
   });
 
-  it('gives grant the arms it accepts, and keeps `any` to the listing', () => {
-    expect(grantTargetOf(parseTarget('authenticated'))).toEqual({ kind: 'authenticated' });
-    expect(grantQueryOf(parseTarget('group:g/any'))).toEqual({
-      kind: 'group',
-      groupId: 'g',
-      role: 'any',
-    });
-    expect(() => grantTargetOf(parseTarget('group:g/any'))).toThrow(/`any` is for `grant ls`/);
-    expect(() => grantTargetOf(parseTarget('anyone'))).toThrow(/not something `grant` can name/);
+  it('gives grant what it accepts, and keeps `any` to the listing', () => {
+    expect(parseGrantTarget('authenticated')).toEqual({ kind: 'authenticated' });
+    expect(parseGrantQuery('group:g/any')).toEqual({ kind: 'group', groupId: 'g', role: 'any' });
+    expect(() => parseGrantTarget('group:g/any')).toThrow(/`any` is for `grant ls`/);
   });
 
-  it('gives link the arms it accepts', () => {
-    expect(relationshipTargetOf(parseTarget('record:01hx@https://x'))).toEqual({
-      scope: 'record',
-      recordId: '01hx',
-      stackUrl: 'https://x',
-    });
-    expect(relationshipTargetOf(parseTarget('external:email/a@b.example'))).toEqual({
+  it('gives link what it accepts', () => {
+    expect(parseLinkTarget('external:email/a@b.example')).toEqual({
       scope: 'external',
       ns: 'email',
       id: 'a@b.example',
     });
-    expect(() => relationshipTargetOf(parseTarget('anyone'))).toThrow(
-      /not something `link` can name/,
+  });
+});
+
+describe('refusing a target from the wrong tier', () => {
+  it('sends a grant naming the world to the authenticated tier', () => {
+    expect(() => parseGrantTarget('anyone')).toThrow(/not something `grant` can name/);
+    expect(() => parseGrantTarget('anyone')).toThrow(/did you mean `authenticated`/);
+  });
+
+  it('never offers `anyone` to perm as a synonym for `authenticated`', () => {
+    // `anyone` is the wider tier, so naming it must stay a choice.
+    expect(() => parsePermissionTarget('authenticated')).toThrow(/no authenticated tier/);
+    expect(() => parsePermissionTarget('authenticated')).toThrow(
+      /wider — it reaches anonymous requesters too/,
     );
-    expect(() => relationshipTargetOf(parseTarget('group:g/admin'))).toThrow(/`link` can name/);
+    expect(() => parsePermissionTarget('authenticated')).not.toThrow(/did you mean/);
+  });
+
+  it('points a link at the group’s own record, by id', () => {
+    expect(() => parseLinkTarget('group:01hxTEAM/member')).toThrow(/use record:01hxTEAM/);
+  });
+
+  it('points perm and grant at a group when handed that group’s record', () => {
+    expect(() => parsePermissionTarget('record:01hxTEAM')).toThrow(
+      /group:01hxTEAM\/<member\|admin>/,
+    );
+    expect(() => parseGrantTarget('record:01hxTEAM')).toThrow(/group:01hxTEAM\/<member\|admin>/);
+  });
+
+  it('refuses an access tier as something to link to', () => {
+    expect(() => parseLinkTarget('anyone')).toThrow(/not something a record can point at/);
+    expect(() => parseLinkTarget('authenticated')).toThrow(/not something a record can point at/);
+  });
+
+  it('always names what the command does accept', () => {
+    expect(() => parsePermissionTarget('record:01hx')).toThrow(
+      /perm accepts: anyone \| <did> \| group:<id>\/<member\|admin>/,
+    );
+    expect(() => parseGrantQuery('anyone')).toThrow(/grant accepts: authenticated/);
+    expect(() => parseLinkTarget('anyone')).toThrow(/link accepts: <did> \| record:/);
   });
 });

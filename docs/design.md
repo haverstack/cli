@@ -407,14 +407,42 @@ below.
 | `external:<ns>/<id>`     | `{ scope: 'external', ns, id }`                         | `link`                |
 
 **This vocabulary is the CLI's own, and deliberately wider than any single core union.**
-Core keeps three apart on purpose — a `RelationshipTarget` names no role, a
-`PermissionGrantee` has no record scope, and `anyone` is a kind rather than a grantee,
-so no dropped field can produce world-read. That split is right for the data model and
-wrong for a person, who is naming Alice either way. So the CLI parses one grammar and
-each command narrows to the arms it accepts, refusing the rest by name
-(`record:01hx… is not something `perm` can name`). The narrowing is where core's
-distinctions are enforced; the grammar is where the human convenience lives. Anything
-that blurs the two — a `perm` that quietly accepted a record target, say — is a bug.
+Core keeps three apart on purpose — [a permission's grantee "is its own shape, not a
+`RelationshipTarget`, which has no role and no group scope"][spec-perm], and `anyone` is
+a kind rather than a grantee so no dropped field can produce world-read. That split is
+right for the data model and wrong for a person, who is naming Alice either way. So the
+CLI parses one grammar and each command narrows to the arms it accepts. The narrowing is
+where core's distinctions are enforced; the grammar is where the human convenience lives.
+
+[spec-perm]: https://github.com/haverstack/core/blob/main/docs/spec/access-control.md#record-level-permissions
+
+Two rules keep the two from blurring:
+
+**Every entry point returns one command's narrow type.** `parsePermissionTarget()`,
+`parseGrantTarget()`, `parseGrantQuery()` and `parseLinkTarget()` are what the commands
+and the package's consumers call; the wide union is module-private and never escapes.
+The table above is therefore a type, not a convention — `parseLinkTarget()` cannot
+return a grantee, because `RelationshipTarget` has nowhere to put one. A single shared
+parser still backs all four, so there is one grammar to keep correct rather than four
+that can drift.
+
+**A target from the wrong tier is refused and told what to say instead**, never
+converted. Mixing the tiers is the mistake with real consequences, so each command names
+the confusion it actually expects:
+
+| Written                              | Refused with                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `grant … --to anyone`                | a grant cannot reach anonymous requesters — did you mean `authenticated`?               |
+| `perm … --to authenticated`          | a record permission has no authenticated tier; `anyone` is the nearest **and is wider** |
+| `link … --to group:X/member`         | to link to the group's record, use `record:X`                                           |
+| `perm`/`grant … --to record:X`       | to name a group, use `group:X/<member\|admin>`                                          |
+| `link … --to anyone`/`authenticated` | an access tier is not something a record can point at                                   |
+
+The asymmetry in the first two rows is deliberate. `anyone` is the **wider** tier — it
+reaches anonymous requesters, `authenticated` reaches only DID holders — so `grant`
+suggesting `authenticated` narrows and is safe to offer, while `perm` may not offer
+`anyone` back as a synonym. It names it and says which way it moves, leaving the
+widening a choice rather than an autocomplete.
 
 Three rules keep the grammar honest:
 

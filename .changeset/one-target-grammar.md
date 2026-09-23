@@ -43,6 +43,19 @@ The single seam is the point. The deferred `--pick` selector resolves a filter t
 and substitutes it into the invoking command; against three flag shapes that would have
 been three substitution paths.
 
-`parseTarget`, `formatTarget` and the three narrowing functions are exported for anyone
-embedding the CLI. `buildRelationshipTarget` and the `PermTargetOptions` /
-`GrantTargetOptions` / `LinkTargetOptions` types are gone — the target is a string now.
+Every entry point hands back one command's own narrow type —
+`parsePermissionTarget()`, `parseGrantTarget()`, `parseGrantQuery()` and
+`parseLinkTarget()`, returning core's `PermissionGrantee`, `GrantGrantee`, `GrantQuery`
+and `RelationshipTarget`. The wide union is module-private and never escapes, so the
+per-command table is enforced by the type system rather than by remembering to call a
+narrowing step. One shared parser still backs all four: one grammar to keep correct
+rather than four that can drift.
+
+A target from the wrong tier is refused and told what to say instead, never converted.
+`grant --to anyone` is pointed at `authenticated`; `link --to group:X/member` at
+`record:X`; `perm`/`grant --to record:X` at `group:X/<role>`. The one asymmetry is
+deliberate: `perm --to authenticated` is _not_ offered `anyone` as a synonym, because
+`anyone` is the wider tier — it names it and says so, leaving the widening a choice.
+
+`buildRelationshipTarget` and the `PermTargetOptions` / `GrantTargetOptions` /
+`LinkTargetOptions` types are gone — the target is a string now.
