@@ -5,74 +5,56 @@
  * Record permissions are associations: one element per bit per grantee,
  * added and withdrawn one at a time by `grantAccess()`/`revokeAccess()`.
  * Both verbs are no-bump, and neither restates the rest of the ACL, so two
- * people sharing one record cannot overwrite each other.
+ * people sharing one record cannot overwrite each other. Both commands
+ * name their target with `--to` (src/target.ts).
  * See docs/design.md § Associations.
  */
 
-import type {
-  AuthorityAssociation,
-  GrantAction,
-  PermissionGrantee,
-  RecordId,
-  Stack,
-  StackRecord,
-} from '@haverstack/core';
-import { shortDid } from '../config.js';
+import type { AuthorityAssociation, GrantAction, Stack, StackRecord } from '@haverstack/core';
+import {
+  formatTarget,
+  grantQueryOf,
+  grantTargetOf,
+  parseTarget,
+  permissionTargetOf,
+  targetOfPermission,
+  type GrantQuery,
+  type GrantTarget,
+  type PermissionTarget,
+  type Target,
+} from '../target.js';
 
 // ---------------------------------------------------------------- perm
 
-export type PermTargetOptions = {
-  anyone?: boolean;
-  entity?: string;
-  group?: string;
-  role?: 'member' | 'admin';
-};
-
-/** `anyone` has no grantee at all, which is what makes it its own arm. */
-type PermTarget = { scope: 'anyone' } | PermissionGrantee;
-
 type Bits = { read: boolean; write: boolean };
 
-function resolvePermTarget(opts: PermTargetOptions): PermTarget {
-  const picked = ['anyone', 'entity', 'group'].filter((k) => opts[k as keyof PermTargetOptions]);
-  if (picked.length !== 1) throw new Error('Pass exactly one of --anyone, --entity, or --group.');
-  if (opts.anyone) return { scope: 'anyone' };
-  if (opts.entity) return { scope: 'entity', entityId: opts.entity };
-  if (!opts.role) {
-    throw new Error('--group needs --role member or --role admin — a permission names one role.');
-  }
-  return { scope: 'group', groupId: opts.group!, role: opts.role };
-}
-
 /** The element a target + bit names, or null where the pair names none. */
-function elementFor(target: PermTarget, label: 'read' | 'write'): AuthorityAssociation | null {
+function elementFor(
+  target: PermissionTarget,
+  label: 'read' | 'write',
+): AuthorityAssociation | null {
   if (target.scope === 'anyone') return label === 'read' ? { kind: 'anyone', label: 'read' } : null;
   return { kind: 'permission', label, grantee: target };
 }
 
-function granteeMatches(a: PermissionGrantee, b: PermissionGrantee): boolean {
+function sameGrantee(a: PermissionTarget, b: PermissionTarget): boolean {
   if (a.scope !== b.scope) return false;
   if (a.scope === 'entity' && b.scope === 'entity') return a.entityId === b.entityId;
   if (a.scope === 'group' && b.scope === 'group') {
     return a.groupId === b.groupId && a.role === b.role;
   }
-  return false;
+  return a.scope === 'anyone';
 }
 
-function bitsOf(permissions: AuthorityAssociation[] | undefined, target: PermTarget): Bits {
+/** An ACL element as the target it names, so both halves compare as one. */
+function granteeOf(p: AuthorityAssociation): PermissionTarget {
+  return p.kind === 'anyone' ? { scope: 'anyone' } : p.grantee;
+}
+
+function bitsOf(permissions: AuthorityAssociation[] | undefined, target: PermissionTarget): Bits {
   const held = (label: 'read' | 'write') =>
-    (permissions ?? []).some((p) =>
-      target.scope === 'anyone'
-        ? p.kind === 'anyone' && label === 'read'
-        : p.kind === 'permission' && p.label === label && granteeMatches(p.grantee, target),
-    );
+    (permissions ?? []).some((p) => p.label === label && sameGrantee(granteeOf(p), target));
   return { read: held('read'), write: held('write') };
-}
-
-function describePermTarget(target: PermTarget): string {
-  if (target.scope === 'anyone') return 'anyone';
-  if (target.scope === 'entity') return shortDid(target.entityId);
-  return `group:${target.groupId}:${target.role}`;
 }
 
 function describeBits(bits: Bits): string {
@@ -89,13 +71,14 @@ async function requireRecord(stack: Stack, id: string): Promise<StackRecord> {
 export async function permAdd(
   stack: Stack,
   id: string,
-  targetOpts: PermTargetOptions,
+  to: string,
   read: boolean,
   write: boolean,
 ): Promise<string> {
-  const target = resolvePermTarget(targetOpts);
+  const parsed = parseTarget(to);
+  const target = permissionTargetOf(parsed);
   if (target.scope === 'anyone' && write) {
-    throw new Error('--anyone carries read only. Name a --entity or --group to grant write.');
+    throw new Error('`anyone` carries read only. Name a DID or a group to grant write.');
   }
   // `anyone` has exactly one bit, so naming it is naming the whole element.
   if (target.scope === 'anyone') read = true;
@@ -110,7 +93,7 @@ export async function permAdd(
   if (write) record = await stack.grantAccess(id, elementFor(target, 'write')!);
 
   const after = bitsOf(record!.permissions, target);
-  const who = describePermTarget(target);
+  const who = formatTarget(parsed);
   return before.read === after.read && before.write === after.write
     ? `${id}: ${who} could already ${describeBits(after)} — nothing to do.`
     : `${id}: ${who} can now ${describeBits(after)}.`;
@@ -119,18 +102,19 @@ export async function permAdd(
 export async function permRemove(
   stack: Stack,
   id: string,
-  targetOpts: PermTargetOptions,
+  to: string,
   read: boolean,
   write: boolean,
 ): Promise<string> {
-  const target = resolvePermTarget(targetOpts);
+  const parsed = parseTarget(to);
+  const target = permissionTargetOf(parsed);
   // Naming no bit withdraws the target's access entirely.
   if (!read && !write) {
     read = true;
     write = target.scope !== 'anyone';
   }
   if (target.scope === 'anyone' && write) {
-    throw new Error('--anyone carries read only — there is no write bit to remove.');
+    throw new Error('`anyone` carries read only — there is no write bit to remove.');
   }
 
   const before = bitsOf((await requireRecord(stack, id)).permissions, target);
@@ -141,7 +125,7 @@ export async function permRemove(
   if (read) record = await stack.revokeAccess(id, elementFor(target, 'read')!);
 
   const after = bitsOf(record!.permissions, target);
-  const who = describePermTarget(target);
+  const who = formatTarget(parsed);
   if (before.read === after.read && before.write === after.write) {
     return `${id}: ${who} had no ${describeBits({ read, write })} to remove — nothing to do.`;
   }
@@ -153,8 +137,8 @@ export async function permRemove(
 /**
  * Who reaches a record. The stored form is one element per bit, which is
  * what `--json` and `_readonly` show; this collapses the two bits a
- * grantee may hold onto one line, since "who reaches this" is the question
- * being asked.
+ * grantee may hold onto one line. Targets print in `--to`'s own grammar,
+ * unelided, so a row can be pasted straight back into a command.
  */
 export async function permList(stack: Stack, id: string, json: boolean): Promise<string> {
   const record = await requireRecord(stack, id);
@@ -162,84 +146,43 @@ export async function permList(stack: Stack, id: string, json: boolean): Promise
   if (json) return JSON.stringify(permissions, null, 2);
   if (permissions.length === 0) return `${id} is private — only the stack owner reaches it.`;
 
-  const byGrantee = new Map<string, Bits>();
+  const byTarget = new Map<string, Bits>();
   for (const p of permissions) {
-    const who = p.kind === 'anyone' ? 'anyone' : describePermTarget(p.grantee);
-    const bits = byGrantee.get(who) ?? { read: false, write: false };
+    const who = formatTarget(targetOfPermission(granteeOf(p)));
+    const bits = byTarget.get(who) ?? { read: false, write: false };
     bits[p.label] = true;
-    byGrantee.set(who, bits);
+    byTarget.set(who, bits);
   }
 
-  const whoW = Math.max('GRANTEE'.length, ...[...byGrantee.keys()].map((w) => w.length));
+  const whoW = Math.max('TARGET'.length, ...[...byTarget.keys()].map((w) => w.length));
   return [
-    `${'GRANTEE'.padEnd(whoW)}  ACCESS`,
-    ...[...byGrantee].map(([who, bits]) => `${who.padEnd(whoW)}  ${describeBits(bits)}`),
+    `${'TARGET'.padEnd(whoW)}  ACCESS`,
+    ...[...byTarget].map(([who, bits]) => `${who.padEnd(whoW)}  ${describeBits(bits)}`),
   ].join('\n');
 }
 
 // ---------------------------------------------------------------- grant
 
-/**
- * Core's `GrantGrantee` union as flags. `role: 'any'` is listing-only —
- * `grant`/`revoke` name one role, since a grant to a group's admins is not
- * the grant to its members.
- */
-export type GrantTargetOptions = {
-  entity?: string;
-  group?: string;
-  role?: 'member' | 'admin' | 'any';
-  authenticated?: boolean;
-};
+const grantTargetFrom = (to: string): GrantTarget => grantTargetOf(parseTarget(to));
 
-type GrantGrantee =
-  | { kind: 'entity'; entityId: string }
-  | { kind: 'group'; groupId: RecordId; role: 'member' | 'admin' }
-  | { kind: 'authenticated' };
-
-type GrantQuery =
-  | { kind: 'entity'; entityId: string }
-  | { kind: 'group'; groupId: RecordId; role: 'member' | 'admin' | 'any' }
-  | { kind: 'authenticated' };
-
-function resolveGrantTarget(opts: GrantTargetOptions): GrantGrantee {
-  const query = resolveGrantQuery(opts, false);
-  if (!query) throw new Error('Pass exactly one of --entity, --group, or --authenticated.');
-  return query as GrantGrantee;
-}
-
-/** The same union, widened for a listing: `--group` alone means any role. */
-function resolveGrantQuery(opts: GrantTargetOptions, allowAny: boolean): GrantQuery | undefined {
-  const picked = ['entity', 'group', 'authenticated'].filter(
-    (k) => opts[k as keyof GrantTargetOptions],
-  );
-  if (picked.length === 0) return undefined;
-  if (picked.length > 1) throw new Error('Pass at most one of --entity, --group, --authenticated.');
-  if (opts.entity) return { kind: 'entity', entityId: opts.entity };
-  if (opts.authenticated) return { kind: 'authenticated' };
-  if (opts.role === 'any' && !allowAny) {
-    throw new Error('--role any is for `grant ls` — a grant names member or admin.');
-  }
-  const role = opts.role ?? (allowAny ? 'any' : undefined);
-  if (!role) {
-    throw new Error('--group needs --role member or --role admin — a grant names one role.');
-  }
-  return { kind: 'group', groupId: opts.group!, role };
-}
-
+/** A stored grant's grantee as a `--to` string, for a listing's output. */
 function describeGrantee(grantee: GrantQuery | undefined): string {
   if (!grantee) return '—';
-  if (grantee.kind === 'entity') return shortDid(grantee.entityId);
-  if (grantee.kind === 'group') return `group:${grantee.groupId}:${grantee.role}`;
+  if (grantee.kind === 'entity')
+    return formatTarget({ kind: 'entity', entityId: grantee.entityId });
+  if (grantee.kind === 'group') {
+    return formatTarget({ kind: 'group', groupId: grantee.groupId, role: grantee.role });
+  }
   return 'authenticated';
 }
 
 export async function grantAdd(
   stack: Stack,
   typeId: string,
-  targetOpts: GrantTargetOptions,
+  to: string,
   actions: GrantAction[],
 ): Promise<string> {
-  const target = resolveGrantTarget(targetOpts);
+  const target = grantTargetFrom(to);
   await stack.grant(target, [{ typeId, actions }]);
   return `Granted ${describeGrantee(target)} [${actions.join(', ')}] on ${typeId}.`;
 }
@@ -247,22 +190,19 @@ export async function grantAdd(
 export async function grantRemove(
   stack: Stack,
   typeId: string,
-  targetOpts: GrantTargetOptions,
+  to: string,
   actions: GrantAction[],
 ): Promise<string> {
-  const target = resolveGrantTarget(targetOpts);
+  const target = grantTargetFrom(to);
   const withdrawn = await stack.revoke(target, [{ typeId, actions }]);
+  const what = `${describeGrantee(target)} [${actions.join(', ')}] on ${typeId}`;
   return withdrawn.length === 0
-    ? `No grant matched ${describeGrantee(target)} [${actions.join(', ')}] on ${typeId} — nothing to revoke.`
-    : `Revoked ${withdrawn.length} grant(s): ${describeGrantee(target)} [${actions.join(', ')}] on ${typeId}.`;
+    ? `No grant matched ${what} — nothing to revoke.`
+    : `Revoked ${withdrawn.length} grant(s): ${what}.`;
 }
 
-export async function grantList(
-  stack: Stack,
-  typeId?: string,
-  targetOpts: GrantTargetOptions = {},
-): Promise<string> {
-  const query = resolveGrantQuery(targetOpts, true);
+export async function grantList(stack: Stack, typeId?: string, to?: string): Promise<string> {
+  const query = to === undefined ? undefined : grantQueryOf(parseTarget(to));
   const all = await stack.listGrants(query);
   const rows = (
     typeId ? all.filter((r) => (r.content as { typeId: string }).typeId === typeId) : all
@@ -271,13 +211,12 @@ export async function grantList(
   if (rows.length === 0) return 'No grants.';
 
   const typeW = Math.max(4, ...rows.map((g) => g.typeId.length));
-  const granteeW = Math.max(
-    'GRANTEE'.length,
-    ...rows.map((g) => describeGrantee(g.grantee).length),
-  );
+  const targetW = Math.max('TARGET'.length, ...rows.map((g) => describeGrantee(g.grantee).length));
   const lines = rows.map(
     (g) =>
-      `${g.typeId.padEnd(typeW)}  ${describeGrantee(g.grantee).padEnd(granteeW)}  ${g.actions.join(', ')}`,
+      `${g.typeId.padEnd(typeW)}  ${describeGrantee(g.grantee).padEnd(targetW)}  ${g.actions.join(', ')}`,
   );
-  return [`${'TYPE'.padEnd(typeW)}  ${'GRANTEE'.padEnd(granteeW)}  ACTIONS`, ...lines].join('\n');
+  return [`${'TYPE'.padEnd(typeW)}  ${'TARGET'.padEnd(targetW)}  ACTIONS`, ...lines].join('\n');
 }
+
+export type { Target };

@@ -377,25 +377,61 @@ subcommands are verb-first (`tag add <id> <label>`, not `tag <id> add <label>`) 
 consistent with `stack add`/`types show` rather than the earlier sketch:
 
 ```
-hstack tag  add|rm <id> <label>
-hstack link add|rm <id> --label <l> ( --to-record <id> [--stack-url <u>]
-                                     | --to-entity <did>
-                                     | --to-external <ns> --external-id <id> )
-hstack perm add|rm <id> ( --anyone | --entity <did> | --group <id> --role <member|admin> )
-                         [--read] [--write]
-hstack perm ls <id>
-hstack grant add|rm <typeId> ( --entity <did> | --group <id> --role <member|admin>
-                              | --authenticated ) <action>...
-hstack grant ls [--type <typeId>] [--entity <did> | --group <id> [--role <r|any>]
-                                   | --authenticated]
+hstack tag   add|rm <id> <label>
+hstack link  add|rm <id> --label <l> --to <target>
+hstack perm  add|rm <id> --to <target> [--read] [--write]
+hstack perm  ls <id>
+hstack grant add|rm <typeId> --to <target> <action>...
+hstack grant ls [--type <typeId>] [--to <target>]
 ```
 
-`link` mirrors core's `RelationshipTarget` union exactly — a target names one identifier
-space (`record` / `entity` / `external`) one way, and an absent `--stack-url` means _this
-stack_, never a wildcard. `dissociate()` matches a target exactly, so `link rm` takes the
-same target flags `link add` did. Typing that union as YAML in a text file is precisely
-what a text editor is bad at; a command with validation and, later, tab-completion is
-better even before any picker exists.
+Typing a discriminated union as YAML in a text file is precisely what a text editor is
+bad at; a command with validation and, later, tab-completion is better even before any
+picker exists. All three name their other end the same way — see **Naming a target**
+below.
+
+### Naming a target
+
+`link`, `perm` and `grant` all take **`--to <target>`**, one grammar parsed in one place
+(`src/target.ts`) and narrowed per command:
+
+| `--to` value             | Resolves to                                             | Accepted by           |
+| ------------------------ | ------------------------------------------------------- | --------------------- |
+| `anyone`                 | `{ kind: 'anyone', label: 'read' }`                     | `perm`                |
+| `authenticated`          | `{ kind: 'authenticated' }`                             | `grant`               |
+| `did:key:z6Mk…`          | the entity arm — sugar for `entity:`                    | `perm` `grant` `link` |
+| `entity:<did>`           | the entity arm                                          | `perm` `grant` `link` |
+| `group:<id>/<role>`      | the group arm; `member`, `admin`, or `any` when listing | `perm` `grant`        |
+| `record:<id>`            | `{ scope: 'record', recordId }`                         | `link`                |
+| `record:<id>@<stackUrl>` | …in another stack                                       | `link`                |
+| `external:<ns>/<id>`     | `{ scope: 'external', ns, id }`                         | `link`                |
+
+**This vocabulary is the CLI's own, and deliberately wider than any single core union.**
+Core keeps three apart on purpose — a `RelationshipTarget` names no role, a
+`PermissionGrantee` has no record scope, and `anyone` is a kind rather than a grantee,
+so no dropped field can produce world-read. That split is right for the data model and
+wrong for a person, who is naming Alice either way. So the CLI parses one grammar and
+each command narrows to the arms it accepts, refusing the rest by name
+(`record:01hx… is not something `perm` can name`). The narrowing is where core's
+distinctions are enforced; the grammar is where the human convenience lives. Anything
+that blurs the two — a `perm` that quietly accepted a record target, say — is a bug.
+
+Three rules keep the grammar honest:
+
+- **Exactly one shape is inferred**: a leading `did:` is an entity. A DID is the one
+  identifier every command takes, and `entity:did:key:…` reads badly on the most frequent
+  call. Everything else names its scheme, and an unknown one is an error rather than a
+  guess — core's `ExternalTarget` carries an explicit `ns` for the same reason.
+- **`external:` nests its namespace** rather than sharing the top-level scheme slot.
+  `ns` is open and user-chosen, so letting it compete with `group:`/`record:` would
+  reserve words out of a namespace the CLI does not own.
+- **`formatTarget()` is `parseTarget()`'s inverse**, so `perm ls` and `grant ls` print
+  targets unelided in the same grammar their commands accept. A listing row is a command
+  argument; copy-paste works, and the smoke test pins it.
+
+The single seam is the point. `--pick` (below, deferred) resolves a partial filter to an
+id and substitutes it into the invoking command — against three flag shapes that would be
+three substitution paths and three sets of rules about which flag it may fill.
 
 **`perm` writes one element at a time.** Record permissions are associations: the ACL is
 two kinds over the same table — `{ kind: 'permission', label: 'read'|'write', grantee }`,
@@ -406,9 +442,9 @@ calls those rather than the `permissions` change-set key. The key replaces the w
 so between the read it would need and the write, whatever a second admin granted is gone;
 a per-element write is the spelling that survives two people sharing one record at once.
 
-An element's identity is its bit plus its grantee, and `role` is **required** on a group —
+An element's identity is its bit plus its grantee, and a role is **required** on a group —
 member is the wider set, admin the narrower, and the two are different elements, so
-`--group` without `--role` is refused rather than guessed at. `--anyone` carries `read`
+`group:<id>` with no role is a parse error rather than a guess. `anyone` carries `read`
 and nothing else; `--write` beside it is refused rather than written and then bounced by
 core. `perm add --read --write` grants read first and `perm rm` withdraws write first,
 because core's cross-element invariant is that **no write lands in a set whose grantee
@@ -419,13 +455,12 @@ neither bit withdraws the target's access entirely; naming one withdraws just th
 `_readonly` block.
 
 `grant` actions are core's `GrantAction` set — `create`, `read-own`, `read-any`,
-`update-own`, `update-any`, `delete-own`, `delete-any`. Its grantee is core's
-`GrantGrantee` union, one required arm: `--entity <did>`, `--group <id> --role <r>`, or
-`--authenticated` (any entity holding a DID — the tier below `--anyone`, which also
-reaches anonymous requesters; the two never share a word). `grant ls` takes the same flags
-as a query, widened by the listing-only `--role any`; an `--entity` listing answers
-_coverage_ (grants naming them, their groups, and every authenticated grant), so it is not
-a preview of what `grant rm` would withdraw. Core enforces the action dependency (a
+`update-own`, `update-any`, `delete-own`, `delete-any`. Its `--to` is `authenticated`
+(any entity holding a DID — the tier below `anyone`, which also reaches anonymous
+requesters; the two never share a word), a DID, or a group at a role. `grant ls` takes
+the same `--to` as a query, widened by the listing-only `group:<id>/any`; a DID listing
+answers _coverage_ (grants naming them, their groups, and every authenticated grant), so
+it is not a preview of what `grant rm` would withdraw. Core enforces the action dependency (a
 `-any`/`-own` mutate action needs a matching-scope read action in the same grant) and
 names the missing one in its own error; the CLI does not re-derive that rule client-side,
 since a copy could disagree with the answer that actually governs the write. `revoke()`
@@ -536,8 +571,9 @@ owning app.
 
 - **`--pick` for association targets.** A short fuzzy-selector (backed by `stack.query()`)
   that resolves a partial filter to an id and substitutes it into the invoking `link` /
-  `perm` / `grant` command. Additive — it doesn't change the flag path — and the natural
-  place to grow toward a fuller interactive mode if flags prove clunky. Not a v1 blocker;
+  `perm` / `grant` command's `--to`. Additive — it fills one slot with a string the
+  grammar already accepts — and the natural place to grow toward a fuller interactive
+  mode if flags prove clunky. Not a v1 blocker;
   revisit once it's clear which commands get used with unfamiliar ids often enough.
 - **Watch / live status.** The CLI reads and writes on demand; a `hstack watch` over
   `stack.subscribe` (server only — `LocalAdapter` has no `subscribeChanges`) is possible

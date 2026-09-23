@@ -22,14 +22,18 @@ export {
 export type { ListOptions, ShowOptions } from './commands/records.js';
 export { stackAdd, stackList, stackUse, stackRemove } from './commands/stack.js';
 
+export { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
 export {
-  tagAdd,
-  tagRemove,
-  linkAdd,
-  linkRemove,
-  buildRelationshipTarget,
-} from './commands/associations.js';
-export type { LinkTargetOptions } from './commands/associations.js';
+  parseTarget,
+  formatTarget,
+  permissionTargetOf,
+  grantTargetOf,
+  grantQueryOf,
+  relationshipTargetOf,
+  targetOfPermission,
+  targetOfRelationship,
+} from './target.js';
+export type { Target, TargetRole, PermissionTarget, GrantTarget, GrantQuery } from './target.js';
 export {
   permAdd,
   permList,
@@ -38,7 +42,6 @@ export {
   grantRemove,
   grantList,
 } from './commands/access.js';
-export type { PermTargetOptions, GrantTargetOptions } from './commands/access.js';
 export { attachAdd, attachRemove } from './commands/attach.js';
 
 export { newRecord, editRecord, editStatus, commitEdit, discardEdit } from './commands/edit.js';

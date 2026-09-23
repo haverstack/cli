@@ -77,19 +77,35 @@ async function main() {
     '`tag add` associated the tag',
   );
 
-  run('perm', 'add', id, '--anyone');
+  run('perm', 'add', id, '--to', 'anyone');
   const shared = JSON.parse(run('show', id, '--json'));
   check(
     (shared.permissions ?? []).some((p) => p.kind === 'anyone' && p.label === 'read'),
-    '`perm add --anyone` wrote an `anyone` element',
+    '`perm add --to anyone` wrote an `anyone` element',
   );
   check(shared.version === tagged.version, 'tagging and sharing are no-bump writes');
-  check(run('perm', 'ls', id).includes('anyone'), '`perm ls` shows who reaches it');
-  run('perm', 'rm', id, '--anyone');
+
+  // The listing prints targets in --to's own grammar, so a row is a command.
+  const permRow = run('perm', 'ls', id)
+    .trim()
+    .split('\n')
+    .at(-1)
+    .split(/\s{2,}/)[0];
+  check(permRow === 'anyone', `\`perm ls\` prints the target as --to takes it (${permRow})`);
+  run('perm', 'rm', id, '--to', permRow);
   check(
     (JSON.parse(run('show', id, '--json')).permissions ?? []).length === 0,
-    '`perm rm --anyone` withdrew it',
+    '`perm ls` output feeds straight back into `perm rm`',
   );
+
+  run('link', 'add', id, '--label', 'mirrors', '--to', 'external:atproto/at://x/y');
+  check(
+    (JSON.parse(run('show', id, '--json')).associations ?? []).some(
+      (a) => a.kind === 'relationship' && a.target?.ns === 'atproto' && a.target?.id === 'at://x/y',
+    ),
+    '`link add --to external:<ns>/<id>` splits on the first slash only',
+  );
+  run('link', 'rm', id, '--label', 'mirrors', '--to', 'external:atproto/at://x/y');
 
   run('rm', id);
   const afterRm = JSON.parse(run('ls', TYPE_ID, '--json'));
