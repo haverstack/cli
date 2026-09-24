@@ -1,5 +1,107 @@
 # @haverstack/cli
 
+## 0.4.0
+
+### Minor Changes
+
+- [#4](https://github.com/haverstack/cli/pull/4) [`6fb20b3`](https://github.com/haverstack/cli/commit/6fb20b3a0ffc66be8ac7622ed22bbcdd1131618f) Thanks [@cuibonobo](https://github.com/cuibonobo)! - Adopt core 0.37: record permissions are associations, and six operations no longer bump a version
+  
+  **`Permission[]` is gone.** A record's ACL is two association kinds over the same table —
+  `{ kind: 'permission', label: 'read' | 'write', grantee }` and `{ kind: 'anyone', label:
+  'read' }` — with `grantAccess()` / `revokeAccess()` adding and withdrawing exactly one
+  element. `hstack perm` follows: it no longer reads the whole list, edits an entry and
+  writes the array back, a read-modify-write that silently discarded whatever a second
+  admin granted in between.
+  
+  The flags move with the model. `--public` becomes `--anyone`, which carries `read` alone
+  (`--write` beside it is refused rather than written and bounced). `--group` now requires
+  `--role member` or `--role admin`, because member and admin are two different elements and
+  neither is a safe guess. `perm rm` naming neither `--read` nor `--write` withdraws the
+  target's access entirely; naming one withdraws just that one. `perm add --read --write`
+  grants read first and `perm rm` withdraws write first, which is the one ordering that
+  satisfies core's rule that no write lands in a set whose grantee cannot read it. New:
+  `hstack perm ls <id>` prints the whole ACL.
+  
+  `hstack grant`'s target is core's required `GrantGrantee` union: `--default` becomes
+  `--authenticated` (any entity holding a DID — a tier below `--anyone`, which also reaches
+  anonymous requesters), and `--group` takes `--role`. `grant ls` accepts the same flags as
+  a query, widened by the listing-only `--role any`, and `grant rm` reports how many grants
+  it withdrew now that `revoke()` returns them.
+  
+  **`associate`, `dissociate`, `permissions`, `reparent`, `unlist` and `list` are no-bump**:
+  they leave `version` and `updatedAt` exactly where they stand. `tag`, `link`, `perm` and
+  `attach` therefore stop printing a version that did not move, and compare the record
+  before and after instead — a repeat now says `already tagged` rather than claiming a write
+  that did not happen. `hstack commit` reports the version its own `mutate()` produced,
+  since the tag and attachment reconcile that follow cannot move it.
+  
+  Also: `hstack rm --hard` reports the files the purged record referenced (core's
+  `delete()` returns them, because destroying the record destroys the only rows naming
+  them), and `hstack attach add` records an `attachmentRecordId` so a filename resolves to
+  the upload that reference came from.
+  
+  **Not backwards compatible.** The SQLite schema is create-if-missing with no migrations,
+  so a database written before core 0.37 keeps its old tables and fails on the first
+  permission write. Existing stacks must be recreated.
+
+- [#4](https://github.com/haverstack/cli/pull/4) [`b5e514e`](https://github.com/haverstack/cli/commit/b5e514e178874c597f6930451e740d3351ad1dbe) Thanks [@cuibonobo](https://github.com/cuibonobo)! - Name every association target the same way: one `--to`, parsed once, narrowed per command
+  
+  `link`, `perm` and `grant` each had their own way of spelling the other end — ten flags
+  between them (`--to-record`, `--stack-url`, `--to-entity`, `--to-external`,
+  `--external-id`, `--anyone`, `--entity`, `--group`, `--role`, `--authenticated`), three
+  sets of "exactly one of" rules, and three shapes for what is, to the person typing, one
+  idea. They now share `--to <target>`:
+  
+  ```
+  anyone                     the world, anonymous requesters included   (perm)
+  authenticated              any entity holding a DID                   (grant)
+  did:key:z6Mk…              an identity                                (all three)
+  group:<id>/<member|admin>  a group's roster at one role               (perm, grant)
+  record:<id>[@<stackUrl>]   a record, here or in another stack         (link)
+  external:<ns>/<id>         something outside any stack                (link)
+  ```
+  
+  The vocabulary is the CLI's own and deliberately wider than any single core union. Core
+  keeps three apart on purpose — a `RelationshipTarget` names no role, a
+  `PermissionGrantee` has no record scope, and `anyone` is a kind rather than a grantee —
+  and that split is right for the data model and wrong for a person, who is naming Alice
+  either way. So one grammar parses, and each command narrows to the arms it accepts,
+  refusing the rest by name. The narrowing is where core's distinctions are enforced.
+  
+  Exactly one shape is inferred: a leading `did:` is an entity, because a DID is the one
+  identifier every command takes and `entity:did:key:…` reads badly on the most frequent
+  call. Everything else names its scheme, and an unknown one is an error rather than a
+  fallback. `external:` nests its namespace rather than sharing the top-level scheme slot,
+  since `ns` is open and user-chosen — letting it compete with `group:`/`record:` would
+  reserve words out of a namespace the CLI does not own.
+  
+  `formatTarget()` is `parseTarget()`'s inverse, so `perm ls` and `grant ls` now print
+  targets unelided in the grammar their own commands accept: a listing row is a command
+  argument. `grant ls --role any` becomes `--to group:<id>/any`, which also puts the
+  listing widening and the world-read tier in structurally different slots instead of one
+  letter apart.
+  
+  The single seam is the point. The deferred `--pick` selector resolves a filter to an id
+  and substitutes it into the invoking command; against three flag shapes that would have
+  been three substitution paths.
+  
+  Every entry point hands back one command's own narrow type —
+  `parsePermissionTarget()`, `parseGrantTarget()`, `parseGrantQuery()` and
+  `parseLinkTarget()`, returning core's `PermissionGrantee`, `GrantGrantee`, `GrantQuery`
+  and `RelationshipTarget`. The wide union is module-private and never escapes, so the
+  per-command table is enforced by the type system rather than by remembering to call a
+  narrowing step. One shared parser still backs all four: one grammar to keep correct
+  rather than four that can drift.
+  
+  A target from the wrong tier is refused and told what to say instead, never converted.
+  `grant --to anyone` is pointed at `authenticated`; `link --to group:X/member` at
+  `record:X`; `perm`/`grant --to record:X` at `group:X/<role>`. The one asymmetry is
+  deliberate: `perm --to authenticated` is _not_ offered `anyone` as a synonym, because
+  `anyone` is the wider tier — it names it and says so, leaving the widening a choice.
+  
+  `buildRelationshipTarget` and the `PermTargetOptions` / `GrantTargetOptions` /
+  `LinkTargetOptions` types are gone — the target is a string now.
+
 ## 0.3.0
 
 ### Minor Changes
