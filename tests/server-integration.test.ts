@@ -77,7 +77,9 @@ describe('server-path integration', () => {
       title: 'orig',
       text: 'owner-authored',
     });
-    await server.ctx.stack.grant(null, [{ typeId: TYPE_ID, actions: ['read-any'] }]);
+    await server.ctx.stack.grant({ kind: 'authenticated' }, [
+      { typeId: TYPE_ID, actions: ['read-any'] },
+    ]);
 
     const opened = await openAsGrantee();
     try {
@@ -100,7 +102,9 @@ describe('server-path integration', () => {
 
   it('denies includeUnlisted to a grantee, over the real wire', async () => {
     await server.ctx.stack.create(TYPE_ID, { text: 'irrelevant' }, { unlisted: true });
-    await server.ctx.stack.grant(null, [{ typeId: TYPE_ID, actions: ['read-any'] }]);
+    await server.ctx.stack.grant({ kind: 'authenticated' }, [
+      { typeId: TYPE_ID, actions: ['read-any'] },
+    ]);
 
     const opened = await openAsGrantee();
     try {
@@ -114,7 +118,9 @@ describe('server-path integration', () => {
 
   it('reports a version conflict when the record moves under an in-progress edit', async () => {
     const record = await server.ctx.stack.create(TYPE_ID, { title: 'orig', text: 'v1' });
-    await server.ctx.stack.grant(null, [{ typeId: TYPE_ID, actions: ['read-any', 'update-any'] }]);
+    await server.ctx.stack.grant({ kind: 'authenticated' }, [
+      { typeId: TYPE_ID, actions: ['read-any', 'update-any'] },
+    ]);
 
     const opened = await openAsGrantee();
     try {

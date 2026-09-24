@@ -92,7 +92,7 @@ describe.each(backends)('full lifecycle — $name', ({ make }) => {
 
     // link — to a second record, created directly (not the thing under test here)
     const folder = await stack.create(FOLDER_ID, { name: 'Inbox' });
-    const linkMsg = await linkAdd(stack, started.recordId, 'files-in', { toRecord: folder.id });
+    const linkMsg = await linkAdd(stack, started.recordId, 'files-in', `record:${folder.id}`);
     expect(linkMsg).toMatch(/files-in/);
     const linked = (await stack.get(started.recordId))!;
     expect(linked.associations).toContainEqual(

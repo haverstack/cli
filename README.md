@@ -52,12 +52,36 @@ hstack ls <typeId>                 # list records of a type
 hstack show <id>                   # render one record
 hstack rm <id>                     # soft-delete; hstack restore <id> to undo
 hstack tag add <id> <label>        # tag a record outside an edit session
-hstack link add <id> --label <l> --to-record <otherId>
-hstack perm add <id> --entity <did> --read
-hstack grant add <typeId> --entity <did> read-any
+hstack link add <id> --label <l> --to record:<otherId>
+hstack perm add <id> --to <did> --read --write
+hstack perm ls <id>                # who reaches this record
+hstack grant add <typeId> --to <did> read-any
 hstack attach add <id> --label <l> --file <path>
 hstack types define <schema.json>  # register { id, name, schema, migratesFrom? }
 ```
+
+### Naming a target
+
+`link`, `perm` and `grant` all say who or what they mean with one `--to`:
+
+```
+anyone                     the world, anonymous requesters included   (perm)
+authenticated              any entity holding a DID                   (grant)
+did:key:z6Mk…              an identity                                (all three)
+group:<id>/<member|admin>  a group's roster at one role               (perm, grant)
+record:<id>[@<stackUrl>]   a record, here or in another stack         (link)
+external:<ns>/<id>         something outside any stack                (link)
+```
+
+One grammar, parsed in one place, narrowed per command — a target the command cannot name
+is refused by name rather than quietly misread. `perm ls` and `grant ls` print targets in
+the same grammar, unelided, so a listing row pastes straight back into a command.
+
+Tagging, linking, attaching, sharing and moving a record are **no-bump** writes in core:
+they leave `version` and `updatedAt` where they stand, so these commands report what the
+record now says rather than a version number that did not move. Record permissions are
+associations — one element per bit per grantee — so `perm add`/`perm rm` write exactly the
+element you name and never restate the rest of the ACL over someone else's change.
 
 Every read command takes `--json` and loops the result cursor to exhaustion (or an
 explicit `--limit`), so it's a client to build on, not just one to sit in front of:

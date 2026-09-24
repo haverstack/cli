@@ -40,12 +40,24 @@ import {
 } from './edit/editor.js';
 import { stackAdd, stackList, stackRemove, stackUse } from './commands/stack.js';
 import { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
-import { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
+import {
+  permAdd,
+  permList,
+  permRemove,
+  grantAdd,
+  grantRemove,
+  grantList,
+} from './commands/access.js';
 import { attachAdd, attachRemove } from './commands/attach.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   version: string;
 };
+
+/** Shown in --to's help, per command, so the accepted arms are on screen. */
+const TARGET_HINT = '<did> | record:<id>[@<stackUrl>] | external:<ns>/<id>';
+const PERM_TARGETS = 'anyone | <did> | group:<id>/<member|admin>';
+const GRANT_TARGETS = 'authenticated | <did> | group:<id>/<member|admin>';
 
 const program = new Command();
 
@@ -427,118 +439,74 @@ const link = program.command('link').description('Add or remove a relationship a
 function linkOptions(cmd: Command) {
   return cmd
     .requiredOption('--label <label>', 'the relationship label')
-    .option('--to-record <id>', 'target a record in this stack (or another, with --stack-url)')
-    .option('--stack-url <url>', 'the target record lives in this other stack')
-    .option('--to-entity <did>', 'target an identity')
-    .option('--to-external <ns>', 'target something outside any stack, in this namespace')
-    .option('--external-id <id>', 'the identifier within --to-external’s namespace');
+    .requiredOption('--to <target>', `what to link to (${TARGET_HINT})`);
 }
-
-type LinkCliOptions = {
-  label: string;
-  toRecord?: string;
-  stackUrl?: string;
-  toEntity?: string;
-  toExternal?: string;
-  externalId?: string;
-};
 
 linkOptions(link.command('add <id>'))
   .description('Link a record to a target')
-  .action(async function (this: Command, id: string, opts: LinkCliOptions) {
+  .action(async function (this: Command, id: string, opts: { label: string; to: string }) {
     const opened = await open(this);
     try {
-      out(
-        await linkAdd(opened.stack, id, opts.label, {
-          toRecord: opts.toRecord,
-          stackUrl: opts.stackUrl,
-          toEntity: opts.toEntity,
-          toExternalNs: opts.toExternal,
-          externalId: opts.externalId,
-        }),
-      );
+      out(await linkAdd(opened.stack, id, opts.label, opts.to));
     } finally {
       await opened.close();
     }
   });
 
 linkOptions(link.command('rm <id>'))
-  .description('Remove a link (same target flags as when it was added)')
-  .action(async function (this: Command, id: string, opts: LinkCliOptions) {
+  .description('Remove a link (the same --to it was added with)')
+  .action(async function (this: Command, id: string, opts: { label: string; to: string }) {
     const opened = await open(this);
     try {
-      out(
-        await linkRemove(opened.stack, id, opts.label, {
-          toRecord: opts.toRecord,
-          stackUrl: opts.stackUrl,
-          toEntity: opts.toEntity,
-          toExternalNs: opts.toExternal,
-          externalId: opts.externalId,
-        }),
-      );
+      out(await linkRemove(opened.stack, id, opts.label, opts.to));
     } finally {
       await opened.close();
     }
   });
 
-const perm = program.command('perm').description('Add or remove a record permission');
+const perm = program
+  .command('perm')
+  .description('Add, remove, or list record permissions (read/write, per target)');
 
 function permOptions(cmd: Command) {
   return cmd
-    .option('--public', 'anyone may access it')
-    .option('--entity <did>', 'grant this identity access')
-    .option('--group <id>', 'grant this group access')
-    .option('--role <role>', 'restrict a --group entry to admins ("admin")')
-    .option('--read', 'grant read access')
-    .option('--write', 'grant write access');
+    .requiredOption('--to <target>', `who reaches it (${PERM_TARGETS})`)
+    .option('--read', 'the read bit')
+    .option('--write', 'the write bit (core refuses a writer who cannot read)');
 }
 
-type PermCliOptions = {
-  public?: boolean;
-  entity?: string;
-  group?: string;
-  role?: string;
-  read?: boolean;
-  write?: boolean;
-};
-
-function permTarget(opts: PermCliOptions) {
-  if (opts.role && opts.role !== 'admin') throw new InvalidArgumentError('--role must be "admin"');
-  return {
-    public: opts.public,
-    entity: opts.entity,
-    group: opts.group,
-    role: opts.role as 'admin' | undefined,
-  };
-}
+type PermCliOptions = { to: string; read?: boolean; write?: boolean };
 
 permOptions(perm.command('add <id>'))
   .description('Grant record-level access')
   .action(async function (this: Command, id: string, opts: PermCliOptions) {
     const opened = await open(this);
     try {
-      out(
-        await permAdd(opened.stack, id, permTarget(opts), Boolean(opts.read), Boolean(opts.write)),
-      );
+      out(await permAdd(opened.stack, id, opts.to, Boolean(opts.read), Boolean(opts.write)));
     } finally {
       await opened.close();
     }
   });
 
 permOptions(perm.command('rm <id>'))
-  .description('Remove or narrow record-level access')
+  .description('Withdraw record-level access — no --read/--write withdraws all of it')
   .action(async function (this: Command, id: string, opts: PermCliOptions) {
     const opened = await open(this);
     try {
-      out(
-        await permRemove(
-          opened.stack,
-          id,
-          permTarget(opts),
-          Boolean(opts.read),
-          Boolean(opts.write),
-        ),
-      );
+      out(await permRemove(opened.stack, id, opts.to, Boolean(opts.read), Boolean(opts.write)));
+    } finally {
+      await opened.close();
+    }
+  });
+
+perm
+  .command('ls <id>')
+  .description('List who reaches a record, in --to’s own grammar')
+  .option('--json', 'output raw JSON')
+  .action(async function (this: Command, id: string, opts: { json?: boolean }) {
+    const opened = await open(this);
+    try {
+      out(await permList(opened.stack, id, Boolean(opts.json)));
     } finally {
       await opened.close();
     }
@@ -546,46 +514,27 @@ permOptions(perm.command('rm <id>'))
 
 const grant = program.command('grant').description('Add, remove, or list type-level grants');
 
-function grantOptions(cmd: Command) {
-  return cmd
-    .option('--entity <did>', 'grant this identity')
-    .option('--group <id>', 'grant this group')
-    .option('--default', 'grant any authenticated entity');
-}
-
-type GrantCliOptions = { entity?: string; group?: string; default?: boolean };
-
-grantOptions(grant.command('add <typeId> <actions...>'))
+grant
+  .command('add <typeId> <actions...>')
   .description('Grant create/read/update/delete on a type family')
-  .action(async function (this: Command, typeId: string, actions: string[], opts: GrantCliOptions) {
+  .requiredOption('--to <target>', `who to grant (${GRANT_TARGETS})`)
+  .action(async function (this: Command, typeId: string, actions: string[], opts: { to: string }) {
     const opened = await open(this);
     try {
-      out(
-        await grantAdd(
-          opened.stack,
-          typeId,
-          { entity: opts.entity, group: opts.group, isDefault: opts.default },
-          actions as GrantAction[],
-        ),
-      );
+      out(await grantAdd(opened.stack, typeId, opts.to, actions as GrantAction[]));
     } finally {
       await opened.close();
     }
   });
 
-grantOptions(grant.command('rm <typeId> <actions...>'))
+grant
+  .command('rm <typeId> <actions...>')
   .description('Revoke actions granted on a type family')
-  .action(async function (this: Command, typeId: string, actions: string[], opts: GrantCliOptions) {
+  .requiredOption('--to <target>', `whose grant to withdraw (${GRANT_TARGETS})`)
+  .action(async function (this: Command, typeId: string, actions: string[], opts: { to: string }) {
     const opened = await open(this);
     try {
-      out(
-        await grantRemove(
-          opened.stack,
-          typeId,
-          { entity: opts.entity, group: opts.group, isDefault: opts.default },
-          actions as GrantAction[],
-        ),
-      );
+      out(await grantRemove(opened.stack, typeId, opts.to, actions as GrantAction[]));
     } finally {
       await opened.close();
     }
@@ -593,12 +542,13 @@ grantOptions(grant.command('rm <typeId> <actions...>'))
 
 grant
   .command('ls')
-  .description('List grants')
+  .description('List grants — narrow by --type and/or --to')
   .option('--type <typeId>', 'only this type')
-  .action(async function (this: Command, opts: { type?: string }) {
+  .option('--to <target>', `only this target (group:<id>/any widens over roles)`)
+  .action(async function (this: Command, opts: { type?: string; to?: string }) {
     const opened = await open(this);
     try {
-      out(await grantList(opened.stack, opts.type));
+      out(await grantList(opened.stack, opts.type, opts.to));
     } finally {
       await opened.close();
     }

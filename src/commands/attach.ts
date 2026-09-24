@@ -3,6 +3,7 @@
  * label other than `embed`. The common case (files dropped in the working
  * directory during `hstack edit`) is handled by commit's own reconcile;
  * see src/edit/attachments.ts and docs/design.md § Attachments — both ways.
+ * Associating is a no-bump write, so neither verb reports a version.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -34,12 +35,16 @@ export async function attachAdd(
   const name = basename(filePath);
   const mimeType = inferContentTypeFromFilename(name) ?? 'application/octet-stream';
   const attachment = await stack.putAttachment(bytes, mimeType, name);
-  const updated = await stack.associate(id, {
+  // `attachmentRecordId` names the upload this particular reference came
+  // from, so a filename lookup resolves to it rather than to whichever
+  // other record happened to upload the same bytes.
+  await stack.associate(id, {
     kind: 'attachment',
     label,
     fileId: attachment.content.fileId,
+    attachmentRecordId: attachment.id,
   });
-  return `${id}: attached "${name}" (${attachment.content.fileId.slice(0, 12)}…) as "${label}" (v${updated.version}).`;
+  return `${id}: attached "${name}" (${attachment.content.fileId.slice(0, 12)}…) as "${label}".`;
 }
 
 export async function attachRemove(
@@ -48,7 +53,10 @@ export async function attachRemove(
   label: string,
   fileId: string,
 ): Promise<string> {
-  await requireRecord(stack, id);
-  const updated = await stack.dissociate(id, { kind: 'attachment', label, fileId });
-  return `${id}: detached "${label}" (${fileId.slice(0, 12)}…) (v${updated.version}).`;
+  const before = await requireRecord(stack, id);
+  const after = await stack.dissociate(id, { kind: 'attachment', label, fileId });
+  if ((after.associations ?? []).length === (before.associations ?? []).length) {
+    return `${id}: no "${label}" attachment for ${fileId.slice(0, 12)}… — nothing to detach.`;
+  }
+  return `${id}: detached "${label}" (${fileId.slice(0, 12)}…).`;
 }

@@ -156,7 +156,7 @@ Local files need no identity: an unscoped `Stack` names no requester. `hstack st
 An edit in progress is a **lock plus a working directory**. `hstack new` / `hstack edit`
 materialize a record, open your editor on it, and _exit_. You edit — and save — as
 freely as you like. `hstack commit` validates the working copy and writes it back as one
-`update()`. `hstack discard` throws it away.
+`mutate()`. `hstack discard` throws it away.
 
 ### Why stateful, not a synchronous editor spawn
 
@@ -166,7 +166,7 @@ losing everything if the editor or terminal dies. The stateful model:
 
 - **makes frequent saves free.** The working copy is a plain file. Saving it fifty times
   while drafting produces exactly zero version-history entries; only `hstack commit` calls
-  `Stack.update()`.
+  `Stack.mutate()`.
 - **survives a dead editor.** The working copy is on disk under XDG state; reopen it, or
   `hstack commit` it, whenever.
 - **lets you consult the stack mid-edit.** `hstack show <other-id>` in another terminal
@@ -221,19 +221,37 @@ you wanted it open alongside. The editor is `config.editor`, else `$VISUAL`, els
 `$EDITOR`; with none set, `new`/`edit` just print the file path to open.
 
 **`parentId` moves with the record.** Core's `mutate()` carries a content patch and a
-`parentId` in one fenced, one-version write, so editing the `parentId` line and
-committing moves the record — core checks the destination exists and refuses a cycle,
-surfaced as an ordinary kept-copy failure if either is wrong. A root record's rendered
+`parentId` in one fenced write, so editing the `parentId` line and committing moves the
+record — core checks the destination exists and refuses a cycle, surfaced as an ordinary
+kept-copy failure if either is wrong. A move on its own is a **no-bump** write (below);
+naming `contentPatch` alongside it is what puts the whole call back under `ifVersion`. A root record's rendered
 buffer has no live `parentId` line to edit, so `hstack edit` always leaves a commented
 `# parentId:` hint in its place — otherwise moving a record would be a capability with no
 way to discover it from the file alone. Re-uploading files dropped into the working
 directory is Phase 6.
 
+### What does and does not bump a version
+
+Core (0.33–0.35) settled six operations as **no-bump**: `associate`, `dissociate`,
+`permissions`, `reparent`, `unlist` and `list`. They leave `version` _and_ `updatedAt`
+exactly where they stand, take no snapshot, and are not fenced by `ifVersion` — a
+set-add/remove composes correctly whatever order two writers land in, so there was never
+a race for a precondition to guard. Only a content patch and the whole-record verbs bump.
+
+Two consequences the CLI lives with:
+
+- **`tag` / `link` / `perm` / `attach` report no version.** There is none to report, and
+  printing the unchanged one would read as "this wrote at v4" rather than "v4 is where
+  this record still is". They compare the record before and after instead, so a repeat
+  says `already tagged` rather than claiming a write that did not happen.
+- **`hstack commit` reports the version its own `mutate()` produced**, not a re-read after
+  the tag and attachment reconcile. Those reconcile passes cannot move it.
+
 ### Optimistic concurrency
 
 `hstack edit` records the record's `version` as `baseVersion`. `hstack commit` passes it as
 `ifVersion`. If the record moved on the stack while you were editing — likelier here than
-elsewhere because the window is a whole writing session — `update()` throws
+elsewhere because the window is a whole writing session — `mutate()` throws
 `StackVersionConflictError { expectedVersion, actualVersion }`. The commit fails, the
 working copy is left exactly as it is, and `hstack` prints the conflict plus how to see what
 changed (`hstack show <id> --history`). Resolving it is manual: re-`hstack edit` a fresh copy
@@ -272,7 +290,8 @@ _readonly:
   associations:            # shown for context; edited via `hstack link` / `hstack tag`
     - { kind: relationship, label: blocks, target: { scope: record, recordId: 01h… } }
   permissions:             # shown for context; edited via `hstack perm`
-    - { access: entity, entityId: did:key:z6Mk…, read: true, write: false }
+    - { kind: permission, label: read, grantee: { scope: entity, entityId: did:key:z6Mk… } }
+    - { kind: anyone, label: read }
 ---
 Body text goes here — the schema's one `text` field.
 ```
@@ -358,40 +377,123 @@ subcommands are verb-first (`tag add <id> <label>`, not `tag <id> add <label>`) 
 consistent with `stack add`/`types show` rather than the earlier sketch:
 
 ```
-hstack tag  add|rm <id> <label>
-hstack link add|rm <id> --label <l> ( --to-record <id> [--stack-url <u>]
-                                     | --to-entity <did>
-                                     | --to-external <ns> --external-id <id> )
-hstack perm add|rm <id> ( --public | --entity <did> | --group <id> [--role admin] )
-                         [--read] [--write]
-hstack grant add|rm <typeId> ( --entity <did> | --group <id> | --default ) <action>...
-hstack grant ls [--type <typeId>]
+hstack tag   add|rm <id> <label>
+hstack link  add|rm <id> --label <l> --to <target>
+hstack perm  add|rm <id> --to <target> [--read] [--write]
+hstack perm  ls <id>
+hstack grant add|rm <typeId> --to <target> <action>...
+hstack grant ls [--type <typeId>] [--to <target>]
 ```
 
-`link` mirrors core's `RelationshipTarget` union exactly — a target names one identifier
-space (`record` / `entity` / `external`) one way, and an absent `--stack-url` means _this
-stack_, never a wildcard. `dissociate()` matches a target exactly, so `link rm` takes the
-same target flags `link add` did. Typing that union as YAML in a text file is precisely
-what a text editor is bad at; a command with validation and, later, tab-completion is
-better even before any picker exists.
+Typing a discriminated union as YAML in a text file is precisely what a text editor is
+bad at; a command with validation and, later, tab-completion is better even before any
+picker exists. All three name their other end the same way — see **Naming a target**
+below.
 
-**`perm`** edits one entry of the record's whole `Permission[]` and writes the array back
-via `mutate()` (there is no single-permission verb any more — `setPermissions()` was
-folded into `mutate()`). An entry's identity is `public`, `entity:<did>`, or
-`group:<id>:<role|member>` — an admin-only and a general-member grant on the same group
-are different entries. `add` **merges** access bits into an existing entry (`--write`
-after `--read` produces read **and** write, never resets what was already granted);
-`rm` **narrows**: naming `--write` alone clears just that bit, and an entry left with
-neither bit is dropped. `rm` with no `--read`/`--write` (or `--public`) drops the entry
-outright. Core itself enforces `write` requires `read` in the same entry — the CLI does
-not duplicate that check, it lets core's own message teach it.
+### Naming a target
+
+`link`, `perm` and `grant` all take **`--to <target>`**, one grammar parsed in one place
+(`src/target.ts`) and narrowed per command:
+
+| `--to` value             | Resolves to                                             | Accepted by           |
+| ------------------------ | ------------------------------------------------------- | --------------------- |
+| `anyone`                 | `{ kind: 'anyone', label: 'read' }`                     | `perm`                |
+| `authenticated`          | `{ kind: 'authenticated' }`                             | `grant`               |
+| `did:key:z6Mk…`          | the entity arm — sugar for `entity:`                    | `perm` `grant` `link` |
+| `entity:<did>`           | the entity arm                                          | `perm` `grant` `link` |
+| `group:<id>/<role>`      | the group arm; `member`, `admin`, or `any` when listing | `perm` `grant`        |
+| `record:<id>`            | `{ scope: 'record', recordId }`                         | `link`                |
+| `record:<id>@<stackUrl>` | …in another stack                                       | `link`                |
+| `external:<ns>/<id>`     | `{ scope: 'external', ns, id }`                         | `link`                |
+
+**This vocabulary is the CLI's own, and deliberately wider than any single core union.**
+Core keeps three apart on purpose — [a permission's grantee "is its own shape, not a
+`RelationshipTarget`, which has no role and no group scope"][spec-perm], and `anyone` is
+a kind rather than a grantee so no dropped field can produce world-read. That split is
+right for the data model and wrong for a person, who is naming Alice either way. So the
+CLI parses one grammar and each command narrows to the arms it accepts. The narrowing is
+where core's distinctions are enforced; the grammar is where the human convenience lives.
+
+[spec-perm]: https://github.com/haverstack/core/blob/main/docs/spec/access-control.md#record-level-permissions
+
+Two rules keep the two from blurring:
+
+**Every entry point returns one command's narrow type.** `parsePermissionTarget()`,
+`parseGrantTarget()`, `parseGrantQuery()` and `parseLinkTarget()` are what the commands
+and the package's consumers call; the wide union is module-private and never escapes.
+The table above is therefore a type, not a convention — `parseLinkTarget()` cannot
+return a grantee, because `RelationshipTarget` has nowhere to put one. A single shared
+parser still backs all four, so there is one grammar to keep correct rather than four
+that can drift.
+
+**A target from the wrong tier is refused and told what to say instead**, never
+converted. Mixing the tiers is the mistake with real consequences, so each command names
+the confusion it actually expects:
+
+| Written                              | Refused with                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `grant … --to anyone`                | a grant cannot reach anonymous requesters — did you mean `authenticated`?               |
+| `perm … --to authenticated`          | a record permission has no authenticated tier; `anyone` is the nearest **and is wider** |
+| `link … --to group:X/member`         | to link to the group's record, use `record:X`                                           |
+| `perm`/`grant … --to record:X`       | to name a group, use `group:X/<member\|admin>`                                          |
+| `link … --to anyone`/`authenticated` | an access tier is not something a record can point at                                   |
+
+The asymmetry in the first two rows is deliberate. `anyone` is the **wider** tier — it
+reaches anonymous requesters, `authenticated` reaches only DID holders — so `grant`
+suggesting `authenticated` narrows and is safe to offer, while `perm` may not offer
+`anyone` back as a synonym. It names it and says which way it moves, leaving the
+widening a choice rather than an autocomplete.
+
+Three rules keep the grammar honest:
+
+- **Exactly one shape is inferred**: a leading `did:` is an entity. A DID is the one
+  identifier every command takes, and `entity:did:key:…` reads badly on the most frequent
+  call. Everything else names its scheme, and an unknown one is an error rather than a
+  guess — core's `ExternalTarget` carries an explicit `ns` for the same reason.
+- **`external:` nests its namespace** rather than sharing the top-level scheme slot.
+  `ns` is open and user-chosen, so letting it compete with `group:`/`record:` would
+  reserve words out of a namespace the CLI does not own.
+- **`formatTarget()` is `parseTarget()`'s inverse**, so `perm ls` and `grant ls` print
+  targets unelided in the same grammar their commands accept. A listing row is a command
+  argument; copy-paste works, and the smoke test pins it.
+
+The single seam is the point. `--pick` (below, deferred) resolves a partial filter to an
+id and substitutes it into the invoking command — against three flag shapes that would be
+three substitution paths and three sets of rules about which flag it may fill.
+
+**`perm` writes one element at a time.** Record permissions are associations: the ACL is
+two kinds over the same table — `{ kind: 'permission', label: 'read'|'write', grantee }`,
+whose grantee is `{ scope: 'entity', entityId }` or `{ scope: 'group', groupId, role }`,
+plus `{ kind: 'anyone', label: 'read' }` for world-read spelled affirmatively. Core's
+`grantAccess(id, el)` / `revokeAccess(id, el)` add and withdraw exactly one, and `perm`
+calls those rather than the `permissions` change-set key. The key replaces the whole set,
+so between the read it would need and the write, whatever a second admin granted is gone;
+a per-element write is the spelling that survives two people sharing one record at once.
+
+An element's identity is its bit plus its grantee, and a role is **required** on a group —
+member is the wider set, admin the narrower, and the two are different elements, so
+`group:<id>` with no role is a parse error rather than a guess. `anyone` carries `read`
+and nothing else; `--write` beside it is refused rather than written and then bounced by
+core. `perm add --read --write` grants read first and `perm rm` withdraws write first,
+because core's cross-element invariant is that **no write lands in a set whose grantee
+cannot read it** — the CLI does not re-derive that rule, it just does not fight the one
+ordering that satisfies it, and lets core's message teach the rest. `perm rm` naming
+neither bit withdraws the target's access entirely; naming one withdraws just that one.
+`perm ls` prints the whole ACL, which is otherwise only visible in `show --json` and the
+`_readonly` block.
 
 `grant` actions are core's `GrantAction` set — `create`, `read-own`, `read-any`,
-`update-own`, `update-any`, `delete-own`, `delete-any`. Core enforces the dependency
-(a `-any`/`-own` mutate action needs a matching-scope read action in the same grant) and
+`update-own`, `update-any`, `delete-own`, `delete-any`. Its `--to` is `authenticated`
+(any entity holding a DID — the tier below `anyone`, which also reaches anonymous
+requesters; the two never share a word), a DID, or a group at a role. `grant ls` takes
+the same `--to` as a query, widened by the listing-only `group:<id>/any`; a DID listing
+answers _coverage_ (grants naming them, their groups, and every authenticated grant), so
+it is not a preview of what `grant rm` would withdraw. Core enforces the action dependency (a
+`-any`/`-own` mutate action needs a matching-scope read action in the same grant) and
 names the missing one in its own error; the CLI does not re-derive that rule client-side,
-since a copy could disagree with the answer that actually governs the write. Grants are
-`_grant` records under the hood and work through either backend.
+since a copy could disagree with the answer that actually governs the write. `revoke()`
+returns what it withdrew, so `grant rm` reports a count rather than a silent success.
+Grants are `_grant` records under the hood and work through either backend.
 
 ### Attachments — both ways
 
@@ -441,28 +543,28 @@ gives, not to invent a more specific one the server never promised.
 
 ## Command surface
 
-| Command                                                                      | Purpose                                                                            |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `hstack stack add <name> (--url <u> [--expected-owner <did>] \| --path <p>)` | Create a profile; generate + store a key for a server profile                      |
-| `hstack stack ls` / `hstack stack use <name>` / `hstack stack rm <name>`     | Manage profiles and the default                                                    |
-| `hstack types`                                                               | List registered types (id, name, schemaHash)                                       |
-| `hstack types show <typeId>`                                                 | Print a type's schema                                                              |
-| `hstack types define <schema.json>`                                          | Register a type from `{ id, name, schema, migratesFrom? }`                         |
-| `hstack ls <typeId> \| --base <baseId>`                                      | List records of a type — `--parent <id>`/`--root`, `--tag <l>`…, `--limit N`       |
-| `hstack show <id>`                                                           | Print a record — `--history` for version history                                   |
-| `hstack new <typeId>`                                                        | Scaffold and open a new record — `--parent`, `--id`, `--minimal`, `--body <field>` |
-| `hstack edit <id>`                                                           | Open an existing record — `--all`, `--body <field>`, `-c`/`--commit`               |
-| `hstack status`                                                              | List open edits for the active profile                                             |
-| `hstack commit [<id>]`                                                       | Validate and write back — `--force` to drop the `ifVersion` fence                  |
-| `hstack discard [<id>]`                                                      | Abandon a working copy — `--stale` to sweep stale locks                            |
-| `hstack rm <id>`                                                             | Soft-delete — `--hard` to purge (owner-only on a server)                           |
-| `hstack restore <id>`                                                        | Undelete                                                                           |
-| `hstack versions <id>`                                                       | Version history                                                                    |
-| `hstack tag add\|rm <id> <label>`                                            | Add or remove a tag                                                                |
-| `hstack link add\|rm <id> --label <l> (...)`                                 | Add or remove a relationship (above)                                               |
-| `hstack perm add\|rm <id> (...)`                                             | Grant, merge, narrow, or drop a record permission (above)                          |
-| `hstack grant add\|rm <typeId> (...) <action>...` / `hstack grant ls`        | Type-level grants (above)                                                          |
-| `hstack attach add\|rm <id> --label <l> (...)`                               | Attach or detach a file outside an edit session (above)                            |
+| Command                                                                      | Purpose                                                                                |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `hstack stack add <name> (--url <u> [--expected-owner <did>] \| --path <p>)` | Create a profile; generate + store a key for a server profile                          |
+| `hstack stack ls` / `hstack stack use <name>` / `hstack stack rm <name>`     | Manage profiles and the default                                                        |
+| `hstack types`                                                               | List registered types (id, name, schemaHash)                                           |
+| `hstack types show <typeId>`                                                 | Print a type's schema                                                                  |
+| `hstack types define <schema.json>`                                          | Register a type from `{ id, name, schema, migratesFrom? }`                             |
+| `hstack ls <typeId> \| --base <baseId>`                                      | List records of a type — `--parent <id>`/`--root`, `--tag <l>`…, `--limit N`           |
+| `hstack show <id>`                                                           | Print a record — `--history` for version history                                       |
+| `hstack new <typeId>`                                                        | Scaffold and open a new record — `--parent`, `--id`, `--minimal`, `--body <field>`     |
+| `hstack edit <id>`                                                           | Open an existing record — `--all`, `--body <field>`, `-c`/`--commit`                   |
+| `hstack status`                                                              | List open edits for the active profile                                                 |
+| `hstack commit [<id>]`                                                       | Validate and write back — `--force` to drop the `ifVersion` fence                      |
+| `hstack discard [<id>]`                                                      | Abandon a working copy — `--stale` to sweep stale locks                                |
+| `hstack rm <id>`                                                             | Soft-delete — `--hard` to purge (owner-only on a server), reporting what it referenced |
+| `hstack restore <id>`                                                        | Undelete                                                                               |
+| `hstack versions <id>`                                                       | Version history                                                                        |
+| `hstack tag add\|rm <id> <label>`                                            | Add or remove a tag                                                                    |
+| `hstack link add\|rm <id> --label <l> (...)`                                 | Add or remove a relationship (above)                                                   |
+| `hstack perm add\|rm <id> (...)` / `hstack perm ls <id>`                     | Grant or withdraw one element of a record's ACL; list the whole of it (above)          |
+| `hstack grant add\|rm <typeId> (...) <action>...` / `hstack grant ls`        | Type-level grants (above)                                                              |
+| `hstack attach add\|rm <id> --label <l> (...)`                               | Attach or detach a file outside an edit session (above)                                |
 
 Every read command takes `--json`. Every listing command **loops the cursor to
 exhaustion** or honours an explicit `--limit` — `cursor === null` is the only
@@ -497,8 +599,9 @@ owning app.
 
 - **`--pick` for association targets.** A short fuzzy-selector (backed by `stack.query()`)
   that resolves a partial filter to an id and substitutes it into the invoking `link` /
-  `perm` / `grant` command. Additive — it doesn't change the flag path — and the natural
-  place to grow toward a fuller interactive mode if flags prove clunky. Not a v1 blocker;
+  `perm` / `grant` command's `--to`. Additive — it fills one slot with a string the
+  grammar already accepts — and the natural place to grow toward a fuller interactive
+  mode if flags prove clunky. Not a v1 blocker;
   revisit once it's clear which commands get used with unfamiliar ids often enough.
 - **Watch / live status.** The CLI reads and writes on demand; a `hstack watch` over
   `stack.subscribe` (server only — `LocalAdapter` has no `subscribeChanges`) is possible

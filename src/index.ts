@@ -22,16 +22,27 @@ export {
 export type { ListOptions, ShowOptions } from './commands/records.js';
 export { stackAdd, stackList, stackUse, stackRemove } from './commands/stack.js';
 
+export { tagAdd, tagRemove, linkAdd, linkRemove } from './commands/associations.js';
+// Each entry point hands back one command's own narrow type — the wide
+// vocabulary is internal, so no caller can hold an un-narrowed target.
 export {
-  tagAdd,
-  tagRemove,
-  linkAdd,
-  linkRemove,
-  buildRelationshipTarget,
-} from './commands/associations.js';
-export type { LinkTargetOptions } from './commands/associations.js';
-export { permAdd, permRemove, grantAdd, grantRemove, grantList } from './commands/access.js';
-export type { PermTargetOptions, GrantTargetOptions } from './commands/access.js';
+  parsePermissionTarget,
+  parseGrantTarget,
+  parseGrantQuery,
+  parseLinkTarget,
+  showPermissionTarget,
+  showGrantTarget,
+  showLinkTarget,
+} from './target.js';
+export type { PermissionTarget, TargetRole } from './target.js';
+export {
+  permAdd,
+  permList,
+  permRemove,
+  grantAdd,
+  grantRemove,
+  grantList,
+} from './commands/access.js';
 export { attachAdd, attachRemove } from './commands/attach.js';
 
 export { newRecord, editRecord, editStatus, commitEdit, discardEdit } from './commands/edit.js';
